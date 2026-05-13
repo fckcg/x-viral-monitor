@@ -346,9 +346,25 @@ function extractTweetData(result) {
 // Draft.js-style content_state → Markdown for X Articles
 function buildArticleMarkdown(articleResult) {
   const title = articleResult.title || '';
-  const coverUrl = articleResult.cover_media?.media_info?.original_img_url
+  const coverUrl = extractMediaUrl(articleResult.cover_media)
+    || articleResult.cover_media?.media_info?.original_img_url
     || articleResult.cover_media?.media_info?.media_url_https
+    || articleResult.cover_media?.url
     || '';
+
+  // Article-level media lookup: in X's payload the content_state's MEDIA
+  // entities carry only a mediaId reference (e.g. {"mediaItems":[{"mediaId":
+  // "2051..."}]}). The actual URLs live on a sibling collection of the
+  // article result. Build a mediaId → renderedMd map by scanning all known
+  // shapes so each MEDIA entity can be resolved at block time.
+  const mediaLookup = buildArticleMediaLookup(articleResult);
+  if (!buildArticleMarkdown._loggedShape && (Object.keys(mediaLookup).length === 0)) {
+    buildArticleMarkdown._loggedShape = true;
+    try {
+      const keys = Object.keys(articleResult || {});
+      console.warn('[XVM] articleResult shape (no media lookup found):', keys, articleResult);
+    } catch (_) {}
+  }
 
   let state = articleResult.content_state;
   if (typeof state === 'string') {
@@ -360,10 +376,12 @@ function buildArticleMarkdown(articleResult) {
   if (coverUrl) lines.push(`![](${coverUrl})`, '');
 
   if (state?.blocks?.length) {
-    // Build a map of entityKey → entity (for LINK / IMAGE)
-    const entityMap = state.entityMap || {};
+    // X serialises entityMap as an ARRAY of {key, value} pairs (not the
+    // classic Draft.js {[key]: entity} object). Normalise to a plain
+    // dict so entityRange.key lookups work regardless of array index.
+    const entityMap = normalizeEntityMap(state.entityMap);
     for (const block of state.blocks) {
-      lines.push(renderArticleBlock(block, entityMap));
+      lines.push(renderArticleBlock(block, entityMap, mediaLookup));
     }
   } else if (articleResult.preview_text) {
     lines.push(articleResult.preview_text);
@@ -372,10 +390,89 @@ function buildArticleMarkdown(articleResult) {
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function renderArticleBlock(block, entityMap) {
+// Walk every plausible "where X parks the resolved media for an article"
+// path and collect mediaId → markdown string. The content_state entity
+// references images by mediaId; we resolve them here.
+function buildArticleMediaLookup(articleResult) {
+  const map = Object.create(null);
+  if (!articleResult) return map;
+
+  const buckets = [
+    articleResult.media_entities,
+    articleResult.media,
+    articleResult.tweet_media,
+    articleResult.attached_media,
+    articleResult.media_results,
+    // Sometimes nested under a `result` wrapper.
+    articleResult.media?.media_results,
+  ];
+
+  const visit = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (typeof node !== 'object') return;
+
+    // Common nested wrappers
+    if (node.result) visit(node.result);
+    if (node.media_results?.result) visit(node.media_results.result);
+    if (node.tweet_media_results?.result) visit(node.tweet_media_results.result);
+
+    const ids = [
+      node.media_id_str, node.media_id, node.mediaId,
+      node.id_str, node.rest_id, node.id,
+    ].filter(Boolean).map(String);
+    if (ids.length) {
+      const md = renderResolvedMedia(node);
+      if (md) {
+        for (const id of ids) {
+          if (!map[id]) map[id] = md;
+        }
+      }
+    }
+  };
+
+  for (const b of buckets) visit(b);
+
+  // Last resort: walk all top-level array fields and pull anything that
+  // looks media-shaped. Catches unknown bucket names.
+  for (const key of Object.keys(articleResult)) {
+    const v = articleResult[key];
+    if (Array.isArray(v)) visit(v);
+  }
+
+  return map;
+}
+
+function normalizeEntityMap(em) {
+  if (!em) return {};
+  if (Array.isArray(em)) {
+    const out = Object.create(null);
+    for (const entry of em) {
+      if (entry && entry.key != null && entry.value) {
+        out[String(entry.key)] = entry.value;
+      }
+    }
+    return out;
+  }
+  return em;
+}
+
+function renderResolvedMedia(node) {
+  const src = extractMediaUrl(node);
+  if (!src) return '';
+  if (isVideoMedia(node) || /\.mp4(\?|$)/i.test(src)) {
+    return `[📹 video](${src})`;
+  }
+  return `![](${src})`;
+}
+
+function renderArticleBlock(block, entityMap, mediaLookup = {}) {
   const type = block.type || 'unstyled';
   const raw = block.text || '';
-  const text = applyInlineFormatting(raw, block.inlineStyleRanges || [], block.entityRanges || [], entityMap);
+  const text = applyInlineFormatting(raw, block.inlineStyleRanges || [], block.entityRanges || [], entityMap, mediaLookup);
 
   switch (type) {
     case 'header-one':   return `# ${text}\n`;
@@ -386,22 +483,164 @@ function renderArticleBlock(block, entityMap) {
     case 'blockquote':   return `> ${text}`;
     case 'code-block':   return '```\n' + text + '\n```';
     case 'atomic': {
-      // Image/media block — find an IMAGE entity on it
-      const imgEntity = (block.entityRanges || [])
-        .map((r) => entityMap[r.key])
-        .find((e) => e && (e.type === 'IMAGE' || e.type === 'MEDIA'));
-      const src = imgEntity?.data?.mediaInfo?.original_img_url
-        || imgEntity?.data?.mediaInfo?.media_url_https
-        || imgEntity?.data?.url
-        || '';
-      return src ? `![](${src})\n` : '';
+      // Atomic blocks carry one media-bearing entity: image, video, GIF,
+      // embedded tweet, or generic embed (YouTube, etc). X Articles use
+      // several entity-type names and a handful of payload shapes — we try
+      // each one in order, then fall back to a console.warn diagnostic so
+      // we can extend support if a new shape shows up.
+      const ranges = block.entityRanges || [];
+      for (const r of ranges) {
+        const entity = entityMap[r.key];
+        if (!entity) continue;
+        const rendered = renderArticleAtomicEntity(entity, mediaLookup);
+        if (rendered) return rendered;
+      }
+      if (ranges.length) {
+        try {
+          const dump = ranges.map((r) => entityMap[r.key]).filter(Boolean);
+          console.warn('[XVM] article atomic: unsupported entity', JSON.stringify(dump).slice(0, 800));
+        } catch (_) {}
+      }
+      return '';
     }
     default:
       return text ? `${text}\n` : '';
   }
 }
 
-function applyInlineFormatting(raw, inlineStyleRanges, entityRanges, entityMap) {
+// Pick the best media URL out of any media-like payload — X uses
+// several casings (mediaInfo / media_info), several places (top-level,
+// nested under media / mediaEntity / tweet_media_results), and a video
+// shape with multiple bitrate variants. Returns null if none usable.
+function extractMediaUrl(payload) {
+  if (!payload) return null;
+  const candidates = [payload, payload.data, payload.media, payload.mediaEntity,
+    payload.tweet_media_results?.result, payload.media_results?.result];
+  for (const node of candidates) {
+    if (!node) continue;
+    const info = node.media_info || node.mediaInfo;
+    const direct = (info && (info.original_img_url || info.media_url_https || info.url))
+      || node.original_img_url || node.media_url_https || node.url || node.src;
+    if (direct && /^https?:/.test(direct)) return direct;
+    const variants = (info && info.variants) || node.video_info?.variants || node.variants || [];
+    if (Array.isArray(variants) && variants.length) {
+      const mp4s = variants
+        .filter((v) => v && v.content_type === 'video/mp4' && v.bitrate != null)
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      if (mp4s[0]?.url) return mp4s[0].url;
+      const anyUrl = variants.find((v) => v && v.url)?.url;
+      if (anyUrl) return anyUrl;
+    }
+  }
+  return null;
+}
+
+function isVideoMedia(payload) {
+  if (!payload) return false;
+  const info = payload.media_info || payload.mediaInfo || payload.data?.media_info || payload.data?.mediaInfo || {};
+  const t = (info.type || payload.type || payload.data?.type || '').toLowerCase();
+  if (t.includes('video') || t.includes('gif')) return true;
+  return false;
+}
+
+function renderArticleAtomicEntity(entity, mediaLookup = {}) {
+  const rawType = String(entity.type || '').toUpperCase();
+  const data = entity.data || {};
+
+  // MEDIA entities with only a mediaId reference — resolve via the
+  // article-level lookup built in buildArticleMediaLookup. Multiple
+  // mediaItems → render each on its own line.
+  if ((rawType === 'MEDIA' || rawType === 'IMAGE') && Array.isArray(data.mediaItems) && data.mediaItems.length) {
+    const out = [];
+    for (const item of data.mediaItems) {
+      const id = String(item?.mediaId || item?.media_id || '');
+      const md = id && mediaLookup[id];
+      if (md) out.push(md);
+    }
+    if (out.length) return out.join('\n') + '\n';
+  }
+
+  // Embedded tweet — render as blockquote with author + link.
+  if (rawType === 'TWEET' || rawType === 'EMBEDDED_TWEET' || rawType === 'TWEET_EMBED'
+      || data.tweet_results || data.tweetResults || data.tweet_id || data.tweetId) {
+    const info = extractEmbeddedTweetInfo(entity);
+    if (info?.url || info?.text) {
+      const out = [];
+      if (info.text) {
+        out.push(info.text.split('\n').map((ln) => `> ${ln}`).join('\n'));
+      }
+      const handleLabel = info.screenName ? `@${info.screenName}` : 'tweet';
+      if (info.url) {
+        out.push(info.text ? `> — [${handleLabel}](${info.url})` : `[${handleLabel}](${info.url})`);
+      }
+      return out.join('\n') + '\n';
+    }
+  }
+
+  // Image / video / GIF / generic media
+  if (rawType === 'IMAGE' || rawType === 'MEDIA' || rawType === 'PHOTO'
+      || rawType === 'VIDEO' || rawType === 'GIF' || rawType === 'ANIMATED_GIF') {
+    const src = extractMediaUrl(entity) || extractMediaUrl(entity.data);
+    if (src) {
+      if (isVideoMedia(entity) || isVideoMedia(entity.data) || /\.mp4(\?|$)/i.test(src)) {
+        return `[📹 video](${src})\n`;
+      }
+      return `![](${src})\n`;
+    }
+  }
+
+  // YouTube / generic oEmbed.
+  if (rawType === 'YOUTUBE' || rawType === 'OEMBED' || rawType === 'EMBED'
+      || rawType === 'LINK_PREVIEW' || rawType === 'CARD') {
+    const href = data.url || data.href || data.embed_url || '';
+    const label = data.title || data.name || rawType.toLowerCase();
+    if (href) return `[🔗 ${label}](${href})\n`;
+  }
+
+  // Last-ditch: any URL-like field in data.
+  const fallbackHref = data.url || data.href || data.expanded_url || '';
+  if (fallbackHref && /^https?:/.test(fallbackHref)) {
+    return `[${data.title || data.name || fallbackHref}](${fallbackHref})\n`;
+  }
+  return '';
+}
+
+function extractEmbeddedTweetInfo(entity) {
+  const data = entity?.data || {};
+  const result = data.tweet_results?.result
+    || data.tweetResults?.result
+    || data.tweet
+    || null;
+  if (result) {
+    const legacy = result.legacy || result;
+    const text = result.note_tweet?.note_tweet_results?.result?.text
+      || legacy?.full_text
+      || legacy?.text
+      || '';
+    const screenName = result.core?.user_results?.result?.legacy?.screen_name
+      || result.user?.screen_name
+      || result.user_results?.result?.legacy?.screen_name
+      || '';
+    const id = legacy?.id_str || result.rest_id || data.tweet_id || data.tweetId || data.id || '';
+    const url = (screenName && id)
+      ? `https://x.com/${screenName}/status/${id}`
+      : (data.url || data.href || '');
+    return { text, screenName, id, url };
+  }
+  const rawUrl = data.url || data.href || '';
+  if (rawUrl && /(?:x|twitter)\.com\/[^/]+\/status\/\d+/.test(rawUrl)) {
+    const m = rawUrl.match(/(?:x|twitter)\.com\/([^/]+)\/status\/(\d+)/);
+    return {
+      text: '',
+      screenName: m?.[1] || '',
+      id: m?.[2] || '',
+      url: rawUrl.replace('twitter.com', 'x.com'),
+    };
+  }
+  return null;
+}
+
+function applyInlineFormatting(raw, inlineStyleRanges, entityRanges, entityMap, mediaLookup = {}) {
   if (!raw) return '';
 
   const boundaries = new Set([0, raw.length]);
@@ -433,9 +672,15 @@ function applyInlineFormatting(raw, inlineStyleRanges, entityRanges, entityMap) 
     const entity = entityRange ? entityMap[entityRange.key] : null;
 
     let text = applyMarkdownStyles(slice, styles);
-    if (entity?.type === 'LINK') {
+    const entityType = String(entity?.type || '').toUpperCase();
+    if (entityType === 'LINK') {
       const href = entity.data?.url || entity.data?.href || '';
       if (href) text = `[${text}](${href})`;
+    } else if (entity && entityType !== '') {
+      // Inline image / embedded tweet / embed within a text block — rare,
+      // but worth rendering instead of dropping the slice.
+      const atomic = renderArticleAtomicEntity(entity, mediaLookup);
+      if (atomic) text = atomic.trimEnd();
     }
 
     parts.push(text);
