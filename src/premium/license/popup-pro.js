@@ -139,121 +139,160 @@
     return `${k.slice(0, 4)}••••${k.slice(-4)}`;
   }
 
-  // ─── Render ─────────────────────────────────────────────────────────
+  // ─── Render (Tier-Card Dashboard hero, mock D) ─────────────────────
+  // Hero card layout: brand row, big TIER text, sub-line, primary CTA,
+  // optional "Activate existing license" secondary link, optional Pro
+  // meta block. Activation form lives in a separate view (view-activate)
+  // wired via window 'xvm-pro-nav' custom event listened by
+  // popup-dashboard.js.
   function render(container, info) {
     const tier = info.tier;
     const days = info.daysLeft;
     container.dataset.tier = tier;
+    document.body.dataset.tier = tier;
     container.innerHTML = '';
 
-    // Tier banner
-    const banner = document.createElement('div');
-    banner.className = 'xvm-pro-banner';
-    let tierLabel, tierIcon;
-    if (tier === 'pro') {
-      tierLabel = t('proBannerPro'); tierIcon = '✨';
-    } else if (tier === 'trial') {
-      tierLabel = days === 1 ? t('proBannerTrialOne') : t('proBannerTrial', days);
-      tierIcon = '⏳';
+    // Head row: brand + 3-dot menu
+    const head = document.createElement('div');
+    head.className = 'hero-head';
+    head.innerHTML = `
+      <div class="hero-brand">
+        <div class="hero-brand-icon">X</div>
+        <div class="hero-brand-text">
+          <span class="hero-brand-name">X Viral Monitor</span>
+          <span class="hero-brand-sub">Powered by Creem</span>
+        </div>
+      </div>
+      <button type="button" class="hero-menu-btn" id="hero-menu-btn" aria-label="More">
+        <svg><use href="#icon-more"/></svg>
+      </button>
+    `;
+    container.appendChild(head);
+    head.querySelector('#hero-menu-btn').addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('xvm-pro-nav', { detail: { view: 'advanced' } }));
+    });
+
+    // Tier giant label
+    const tierEl = document.createElement('div');
+    tierEl.className = 'hero-tier';
+    tierEl.textContent = tier === 'pro' ? 'PRO' : tier === 'trial' ? 'TRIAL' : 'FREE';
+    container.appendChild(tierEl);
+
+    // Tier subtitle
+    const sub = document.createElement('div');
+    sub.className = 'hero-tier-sub';
+    if (tier === 'trial') {
+      sub.textContent = days === 1 ? t('heroTrialDayOne') : t('heroTrialDaysLeft', days);
+    } else if (tier === 'pro') {
+      sub.textContent = t('heroProActive');
     } else {
-      tierLabel = t('proBannerFree'); tierIcon = '🌱';
+      sub.textContent = t('heroFreeTagline');
     }
-    banner.innerHTML = `<span class="xvm-pro-icon">${tierIcon}</span> <span class="xvm-pro-tier"></span>`;
-    banner.querySelector('.xvm-pro-tier').textContent = tierLabel;
-    container.appendChild(banner);
+    container.appendChild(sub);
 
-    // Trial-ending nudge (≤ 3 days)
-    if (tier === 'trial' && days <= 3) {
-      const nudge = document.createElement('div');
-      nudge.className = 'xvm-pro-nudge';
-      nudge.textContent = days === 1 ? t('proNudgeTrialEndOne') : t('proNudgeTrialEnd', days);
-      container.appendChild(nudge);
-    }
-
-    // Free / Trial → Upgrade CTAs
+    // CTA row
     if (tier !== 'pro') {
-      const cta = document.createElement('div');
-      cta.className = 'xvm-pro-cta';
-      const m = document.createElement('a');
-      m.className = 'xvm-pro-btn'; m.href = BUY_URL_MONTHLY; m.target = '_blank'; m.rel = 'noopener';
-      m.textContent = t('proCtaMonthly');
-      const a = document.createElement('a');
-      a.className = 'xvm-pro-btn xvm-pro-btn-primary'; a.href = BUY_URL_ANNUAL; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = t('proCtaAnnual');
-      cta.append(m, a);
-      container.appendChild(cta);
+      const cta = document.createElement('a');
+      cta.className = 'hero-cta';
+      cta.href = BUY_URL_ANNUAL; // primary CTA = annual (best value, save 17%)
+      cta.target = '_blank'; cta.rel = 'noopener';
+      cta.innerHTML = `<svg><use href="#icon-sparkles"/></svg> <span></span>`;
+      cta.querySelector('span').textContent = t('heroCtaUpgradeAnnual');
+      const row = document.createElement('div');
+      row.className = 'hero-cta-row';
+      row.appendChild(cta);
+      container.appendChild(row);
 
-      // Activation form
-      const form = document.createElement('div');
-      form.className = 'xvm-pro-activate';
-      form.innerHTML = `
-        <label class="xvm-pro-act-label"></label>
-        <div class="xvm-pro-act-row">
-          <input type="text" id="xvm-pro-key" autocomplete="off" />
-          <button type="button" id="xvm-pro-activate"></button>
-        </div>
-        <div class="xvm-pro-msg" id="xvm-pro-msg"></div>
-      `;
-      form.querySelector('.xvm-pro-act-label').textContent = t('proActivateLabel');
-      form.querySelector('#xvm-pro-key').placeholder = t('proActivatePlaceholder');
-      form.querySelector('#xvm-pro-activate').textContent = t('proActivateBtn');
-      container.appendChild(form);
-
-      form.querySelector('#xvm-pro-activate').addEventListener('click', async () => {
-        const keyInput = form.querySelector('#xvm-pro-key');
-        const msg = form.querySelector('#xvm-pro-msg');
-        const btn = form.querySelector('#xvm-pro-activate');
-        const key = keyInput.value.trim();
-        if (!KEY_RE.test(key)) {
-          msg.textContent = t('proActErrFormat');
-          msg.dataset.kind = 'err';
-          return;
-        }
-        btn.disabled = true; btn.textContent = t('proActivating');
-        const res = await activate(key);
-        btn.disabled = false; btn.textContent = t('proActivateBtn');
-        if (res.ok) {
-          msg.textContent = t('proActivatedOk');
-          msg.dataset.kind = 'ok';
-          refresh();
-        } else if (res.error === 'worker_url_unset') {
-          msg.textContent = t('proActErrWorkerUnset');
-          msg.dataset.kind = 'err';
-        } else {
-          const detail = res.error + (res.message ? ' — ' + res.message : '');
-          msg.textContent = t('proActErrGeneric', detail);
-          msg.dataset.kind = 'err';
-        }
+      // Secondary: Monthly link
+      const monthly = document.createElement('button');
+      monthly.type = 'button';
+      monthly.className = 'hero-act-link';
+      monthly.textContent = t('heroCtaUpgradeMonthly');
+      monthly.addEventListener('click', () => {
+        window.open(BUY_URL_MONTHLY, '_blank', 'noopener');
       });
+      container.appendChild(monthly);
+
+      // "Activate existing license" link
+      const actLink = document.createElement('button');
+      actLink.type = 'button';
+      actLink.className = 'hero-act-link';
+      actLink.textContent = t('heroActivateExistingLink');
+      actLink.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('xvm-pro-nav', { detail: { view: 'activate' } }));
+      });
+      container.appendChild(actLink);
     } else {
-      // Pro: show masked key + deactivate
+      // Pro: manage subscription CTA + meta block
+      const cta = document.createElement('a');
+      cta.className = 'hero-cta secondary';
+      cta.href = 'https://www.creem.io/dashboard';
+      cta.target = '_blank'; cta.rel = 'noopener';
+      cta.textContent = t('proManageBtn');
+      const row = document.createElement('div');
+      row.className = 'hero-cta-row';
+      row.appendChild(cta);
+      container.appendChild(row);
+
       const rec = info.record || {};
-      const box = document.createElement('div');
-      box.className = 'xvm-pro-licbox';
-      box.innerHTML = `
-        <div class="xvm-pro-licrow"><span data-k="proLicenseField"></span><code>${maskKey(rec.key)}</code></div>
-        <div class="xvm-pro-licrow"><span data-k="proActivatedField"></span><span>${rec.activatedAt ? new Date(rec.activatedAt).toLocaleDateString() : '—'}</span></div>
-        ${rec.expiresAt ? `<div class="xvm-pro-licrow"><span data-k="proExpiresField"></span><span>${new Date(rec.expiresAt).toLocaleDateString()}</span></div>` : ''}
-        <div class="xvm-pro-act-row">
-          <a class="xvm-pro-btn" href="https://www.creem.io/dashboard" target="_blank" rel="noopener"></a>
-          <button type="button" id="xvm-pro-deactivate" class="xvm-pro-btn-ghost"></button>
-        </div>
-        <div class="xvm-pro-msg" id="xvm-pro-msg"></div>
+      const meta = document.createElement('div');
+      meta.className = 'hero-pro-meta';
+      meta.innerHTML = `
+        <div class="row"><span></span><code>${maskKey(rec.key)}</code></div>
+        ${rec.activatedAt ? `<div class="row"><span></span><span>${new Date(rec.activatedAt).toLocaleDateString()}</span></div>` : ''}
+        ${rec.expiresAt   ? `<div class="row"><span></span><span>${new Date(rec.expiresAt).toLocaleDateString()}</span></div>` : ''}
       `;
-      container.appendChild(box);
-      box.querySelectorAll('[data-k]').forEach((el) => { el.textContent = t(el.dataset.k); });
-      box.querySelector('a.xvm-pro-btn').textContent = t('proManageBtn');
-      box.querySelector('#xvm-pro-deactivate').textContent = t('proDeactivateBtn');
-      box.querySelector('#xvm-pro-deactivate').addEventListener('click', async () => {
-        const msg = box.querySelector('#xvm-pro-msg');
-        msg.textContent = t('proDeactivating');
-        const res = await deactivate();
-        msg.textContent = res.ok ? t('proDeactivatedOk') : t('proDeactivateErr');
-        msg.dataset.kind = res.ok ? 'ok' : 'err';
-        refresh();
+      const labels = ['proLicenseField'];
+      if (rec.activatedAt) labels.push('proActivatedField');
+      if (rec.expiresAt)   labels.push('proExpiresField');
+      meta.querySelectorAll('.row > span:first-child').forEach((el, i) => {
+        el.textContent = t(labels[i] || '');
       });
+      container.appendChild(meta);
     }
   }
+
+  // === Activation submit handler — wired by popup-dashboard via the
+  // view-activate form. Imported here so the activate() logic stays
+  // co-located with the rest of license operations.
+  function wireActivateView() {
+    const btn   = document.getElementById('activate-submit');
+    const cancel = document.getElementById('activate-cancel');
+    const keyEl = document.getElementById('activate-key');
+    const msg   = document.getElementById('activate-msg');
+    if (!btn || !keyEl || !msg) return;
+    cancel?.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('xvm-pro-nav', { detail: { view: 'dashboard' } }));
+    });
+    btn.addEventListener('click', async () => {
+      const key = keyEl.value.trim();
+      if (!KEY_RE.test(key)) {
+        msg.textContent = t('proActErrFormat');
+        msg.dataset.kind = 'err';
+        return;
+      }
+      btn.disabled = true; btn.textContent = t('proActivating');
+      const res = await activate(key);
+      btn.disabled = false; btn.textContent = t('proActivateBtn');
+      if (res.ok) {
+        msg.textContent = t('proActivatedOk');
+        msg.dataset.kind = 'ok';
+        // Auto-return to dashboard so user sees the new Pro hero.
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('xvm-pro-nav', { detail: { view: 'dashboard' } }));
+        }, 800);
+        refresh();
+      } else if (res.error === 'worker_url_unset') {
+        msg.textContent = t('proActErrWorkerUnset');
+        msg.dataset.kind = 'err';
+      } else {
+        const detail = res.error + (res.message ? ' — ' + res.message : '');
+        msg.textContent = t('proActErrGeneric', detail);
+        msg.dataset.kind = 'err';
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', wireActivateView);
 
   async function refresh() {
     const container = document.getElementById('xvm-pro-section');

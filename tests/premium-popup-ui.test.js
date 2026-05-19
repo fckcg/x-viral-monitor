@@ -89,9 +89,14 @@ describe('#45 step 3 — popup pro UI', () => {
     ).toBe(true);
   });
 
-  it('popup-pro.js handles tier-trial-nearing-end nudge (≤ 3 days)', () => {
-    expect(/days\s*<=\s*3/.test(js),
-      'popup-pro.js must show a nudge when daysLeft ≤ 3'
+  it('popup-pro.js surfaces trial daysLeft in the hero subtitle', () => {
+    // Mock D pivot: the dedicated "≤3 days nudge" box was replaced by
+    // the hero subtitle which always shows "X days left in trial".
+    // The urgency is communicated by the giant TRIAL label + the
+    // subtitle, not a separate yellow nudge. We pin that trial
+    // rendering still threads days through:
+    expect(/heroTrialDaysLeft|heroTrialDayOne/.test(js),
+      'popup-pro.js must localize the trial subtitle via heroTrialDaysLeft / heroTrialDayOne'
     ).toBe(true);
   });
 
