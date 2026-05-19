@@ -1,0 +1,298 @@
+// === XVM Pro license bridge (ISOLATED world) ===
+//
+// Owns chrome.storage.local for license state and trial timestamp, and the
+// Worker proxy calls for Creem license activate/validate/deactivate. Pushes
+// the resolved tier to MAIN world via window.postMessage so gate.js
+// (MAIN world) can answer feature modules without touching chrome.storage
+// or fetch.
+//
+// ADR-0004 边界:
+//   - extension code contains NO server-side secret (Worker holds CREEM_API_KEY)
+//   - tier resolution lives in a single computation path (resolveTier)
+//   - feature modules NEVER read license/trial/storage directly — they only
+//     receive postMessage updates routed through gate.js
+//
+// Message contract (event.data.type):
+//   ← XVM_TIER_REQUEST                              (from MAIN/gate.js on init)
+//   → XVM_TIER_UPDATE { tier, daysLeft, source }    (to MAIN/gate.js)
+//   ← XVM_LICENSE_ACTIVATE  { key }                 (from popup)
+//   → XVM_LICENSE_ACTIVATE_RESULT { ok, error? }
+//   ← XVM_LICENSE_DEACTIVATE
+//   → XVM_LICENSE_DEACTIVATE_RESULT { ok }
+//   ← XVM_LICENSE_STATUS_REQUEST
+//   → XVM_LICENSE_STATUS { record, tier, daysLeft, source }
+//
+// Worker URL is a build-time placeholder; deploy step (worker/DEPLOY.md)
+// produces the real URL which is sed'd into this file before zip.
+
+(() => {
+  if (window.__xvmLicenseBridge) return; // idempotent on hot reload
+  window.__xvmLicenseBridge = true;
+
+  // ─── Configuration ──────────────────────────────────────────────────
+  // Placeholder replaced at build time. If you see __XVM_LICENSE_WORKER__
+  // in production, the build script failed to substitute.
+  const LICENSE_PROXY_URL = 'https://xmp-license.lengkuxiaomao.workers.dev';
+
+  // All tier-resolution logic lives in tier-logic.js (loaded BEFORE us per
+  // manifest content_scripts order). Pulling from globalThis keeps both
+  // contexts (isolated + popup) on a single source of truth.
+  const TL = globalThis.__xvmTierLogic;
+  if (!TL) {
+    console.error('[xvm pro] tier-logic.js not loaded before isolated.js — manifest content_scripts order broken');
+    return;
+  }
+  const { isXvmProduct, trialStatus, licenseStatusFrom, resolveTierFrom } = TL;
+
+  const STORAGE_KEY    = 'xvm_license_v1';
+  const TRIAL_KEY      = 'xvm_trial_v1';
+  const DEVICE_ID_KEY  = 'xvm_device_id';
+  const RATE_FILTER_KEY = 'xvm_rate_filter_v1';
+
+  const KEY_RE = /^[A-Za-z0-9_\-]{8,128}$/;
+
+  // ─── chrome.storage wrappers (best-effort no-op outside extension) ──
+  function safeStorageGet(key, fallback) {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) return resolve(fallback);
+        chrome.storage.local.get(key, (o) => resolve(o?.[key] ?? fallback));
+      } catch (_) { resolve(fallback); }
+    });
+  }
+  function safeStorageSet(obj) {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) return resolve();
+        chrome.storage.local.set(obj, resolve);
+      } catch (_) { resolve(); }
+    });
+  }
+  function safeStorageRemove(key) {
+    return new Promise((resolve) => {
+      try {
+        if (!chrome?.storage?.local) return resolve();
+        chrome.storage.local.remove(key, resolve);
+      } catch (_) { resolve(); }
+    });
+  }
+
+  // ─── Trial state machine ────────────────────────────────────────────
+  // trialStatus pure helper imported from tier-logic.js above.
+  async function ensureTrialStarted() {
+    let rec = await safeStorageGet(TRIAL_KEY, null);
+    if (!rec || !Number.isFinite(rec.startAt)) {
+      rec = { startAt: Date.now() };
+      await safeStorageSet({ [TRIAL_KEY]: rec });
+    }
+    return rec;
+  }
+
+  // ─── Creem proxy ────────────────────────────────────────────────────
+  async function callProxy(action, body) {
+    if (LICENSE_PROXY_URL === '__XVM_LICENSE_WORKER__') {
+      throw new Error('worker_url_unset');
+    }
+    const res = await fetch(`${LICENSE_PROXY_URL}/${action}`, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  }
+
+  async function getDeviceId() {
+    let id = await safeStorageGet(DEVICE_ID_KEY, null);
+    if (!id) {
+      id = crypto.randomUUID();
+      await safeStorageSet({ [DEVICE_ID_KEY]: id });
+    }
+    return id;
+  }
+
+  function buildInstanceName(deviceId) {
+    const ua = navigator.userAgent || '';
+    const browser = /Edg\//.test(ua) ? 'Edge'
+      : /Chrome\//.test(ua) ? 'Chrome'
+      : /Firefox\//.test(ua) ? 'Firefox' : 'Browser';
+    const os = /Windows/.test(ua) ? 'Win'
+      : /Mac OS/.test(ua) ? 'Mac'
+      : /Linux/.test(ua) ? 'Linux' : 'Other';
+    return `${browser} / ${os} — ${deviceId.slice(0, 8)}`;
+  }
+
+  // ─── License operations ─────────────────────────────────────────────
+  async function activate(rawKey) {
+    const key = String(rawKey || '').trim();
+    if (!KEY_RE.test(key)) return { ok: false, error: 'invalid_format' };
+    const deviceId = await getDeviceId();
+    const instanceName = buildInstanceName(deviceId);
+    let envelope;
+    try {
+      envelope = await callProxy('activate', { key, instance_name: instanceName });
+    } catch (e) {
+      return { ok: false, error: 'network', message: String(e?.message || e) };
+    }
+    if (!envelope?.ok) return { ok: false, error: 'activation_failed', detail: envelope };
+    const data = envelope.data || {};
+    // Client-side product scoping — reject licenses belonging to another
+    // product on the same shared Worker (e.g. an x-md-paste license that
+    // the Worker's whitelist would otherwise accept).
+    if (data.product_id && !isXvmProduct(data.product_id)) {
+      return { ok: false, error: 'wrong_product', detail: { actual: data.product_id } };
+    }
+    const inst = data.instance || {};
+    const record = {
+      key,
+      instanceId: inst.id || null,
+      instanceName: inst.name || instanceName,
+      deviceId,
+      activatedAt: Date.now(),
+      lastChecked: Date.now(),
+      lastTriedAt: Date.now(),
+      status: data.status || 'active',
+      activationLimit: data.activation_limit ?? null,
+      activationUsage: data.activation ?? null,
+      expiresAt: data.expires_at ? new Date(data.expires_at).getTime() : null,
+      productId: data.product_id || null,
+    };
+    await safeStorageSet({ [STORAGE_KEY]: record });
+    pushTier();
+    return { ok: true, record };
+  }
+
+  async function deactivate() {
+    const stored = await safeStorageGet(STORAGE_KEY, null);
+    if (stored?.key && stored?.instanceId) {
+      try { await callProxy('deactivate', { key: stored.key, instance_id: stored.instanceId }); }
+      catch (_) {}
+    }
+    await safeStorageRemove(STORAGE_KEY);
+    pushTier();
+    return { ok: true };
+  }
+
+  async function revalidateInBackground(stored) {
+    let envelope;
+    try {
+      envelope = await callProxy('validate', { key: stored.key, instance_id: stored.instanceId });
+    } catch (_) {
+      await safeStorageSet({ [STORAGE_KEY]: { ...stored, lastTriedAt: Date.now() } });
+      return;
+    }
+    const data = envelope?.data || {};
+    const updated = {
+      ...stored,
+      status: data.status || stored.status || 'active',
+      activationLimit: data.activation_limit ?? stored.activationLimit,
+      activationUsage: data.activation ?? stored.activationUsage,
+      expiresAt: data.expires_at ? new Date(data.expires_at).getTime() : stored.expiresAt,
+      lastTriedAt: Date.now(),
+    };
+    if (envelope?.ok && (data.status === 'active' || !data.status)) {
+      updated.lastChecked = Date.now();
+    }
+    await safeStorageSet({ [STORAGE_KEY]: updated });
+    pushTier();
+  }
+
+  // ─── License status + tier resolver ─────────────────────────────────
+  // Pure logic lives in tier-logic.js. We only do storage I/O + the
+  // side-effecting background revalidate.
+  async function getLicenseStatus() {
+    const stored = await safeStorageGet(STORAGE_KEY, null);
+    const status = licenseStatusFrom(stored, Date.now());
+    // Stale-cache side-effect: kick off background revalidate. The pure
+    // helper just reports the verdict; we own the I/O.
+    if (status.source === 'offline-grace' && stored) {
+      revalidateInBackground(stored).catch(() => {});
+    }
+    return status;
+  }
+
+  async function resolveTier() {
+    const stored = await safeStorageGet(STORAGE_KEY, null);
+    const trial = await safeStorageGet(TRIAL_KEY, null);
+    const r = resolveTierFrom(stored, trial, Date.now());
+    // Side-effect: if the verdict served from offline-grace, kick revalidate.
+    if (r.source === 'offline-grace' && stored) {
+      revalidateInBackground(stored).catch(() => {});
+    }
+    return r;
+  }
+
+  // ─── Push tier to MAIN world ────────────────────────────────────────
+  async function pushTier() {
+    const r = await resolveTier();
+    window.postMessage({
+      type: 'XVM_TIER_UPDATE',
+      tier: r.tier,
+      daysLeft: r.daysLeft,
+      source: r.source,
+    }, '*');
+  }
+
+  // ─── Message router ─────────────────────────────────────────────────
+  window.addEventListener('message', async (event) => {
+    if (event.source !== window) return;
+    const t = event.data?.type;
+    if (t === 'XVM_TIER_REQUEST') {
+      pushTier();
+      return;
+    }
+    if (t === 'XVM_LICENSE_STATUS_REQUEST') {
+      const lic = await getLicenseStatus();
+      const r = await resolveTier();
+      window.postMessage({
+        type: 'XVM_LICENSE_STATUS',
+        record: lic.record,
+        tier: r.tier,
+        daysLeft: r.daysLeft,
+        source: r.source,
+      }, '*');
+      return;
+    }
+    if (t === 'XVM_LICENSE_ACTIVATE' && typeof event.data.key === 'string') {
+      const res = await activate(event.data.key);
+      window.postMessage({
+        type: 'XVM_LICENSE_ACTIVATE_RESULT',
+        ok: !!res.ok,
+        error: res.error || null,
+      }, '*');
+      return;
+    }
+    if (t === 'XVM_LICENSE_DEACTIVATE') {
+      const res = await deactivate();
+      window.postMessage({ type: 'XVM_LICENSE_DEACTIVATE_RESULT', ok: !!res.ok }, '*');
+      return;
+    }
+  });
+
+  // ─── Rate filter settings bridge ────────────────────────────────────
+  // Popup (extension context) owns xvm_rate_filter_v1; filter.js (MAIN
+  // world) needs to react to changes. We forward the storage value as
+  // XVM_RATE_SETTINGS_UPDATE postMessage at boot + on every change.
+  async function pushRateSettings() {
+    const settings = await safeStorageGet(RATE_FILTER_KEY, null);
+    if (settings && typeof settings === 'object') {
+      window.postMessage({ type: 'XVM_RATE_SETTINGS_UPDATE', settings }, '*');
+    }
+  }
+
+  // ─── Bootstrap: ensure trial started, push tier so MAIN can render ──
+  (async () => {
+    await ensureTrialStarted();
+    pushTier();
+    pushRateSettings();
+  })();
+
+  // Re-push on storage change so tier flips immediately if the license
+  // status / trial start changes from another page.
+  try {
+    chrome?.storage?.onChanged?.addListener?.((changes, area) => {
+      if (area !== 'local') return;
+      if (STORAGE_KEY in changes || TRIAL_KEY in changes) pushTier();
+      if (RATE_FILTER_KEY in changes) pushRateSettings();
+    });
+  } catch (_) {}
+})();

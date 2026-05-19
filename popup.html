@@ -301,12 +301,119 @@
       outline: none;
       border-color: var(--accent);
     }
+
+    /* XVM Pro tier banner + activation (#45 step 3) */
+    #xvm-pro-section { margin: 0 0 14px; }
+    .xvm-pro-banner {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 10px; border-radius: 8px;
+      background: linear-gradient(135deg, #f5e6d2, #f8d7a3);
+      border: 1px solid var(--line);
+      font-weight: 600; font-size: 13px;
+    }
+    #xvm-pro-section[data-tier="pro"] .xvm-pro-banner {
+      background: linear-gradient(135deg, #d6ebff, #b3d8ff);
+    }
+    #xvm-pro-section[data-tier="trial"] .xvm-pro-banner {
+      background: linear-gradient(135deg, #fff3d6, #ffe1a3);
+    }
+    .xvm-pro-nudge {
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: #fff4e6; color: var(--accent-strong);
+      font-size: 11px; border: 1px dashed var(--accent);
+    }
+    .xvm-pro-cta {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .xvm-pro-btn, .xvm-pro-btn-primary, .xvm-pro-btn-ghost {
+      flex: 1; text-align: center;
+      padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: #fff; color: var(--accent-strong);
+      font-size: 12px; font-weight: 600;
+      text-decoration: none; cursor: pointer;
+    }
+    .xvm-pro-btn-primary {
+      background: var(--accent); color: #fff;
+    }
+    .xvm-pro-btn-ghost {
+      border-color: var(--line); color: var(--muted);
+    }
+    .xvm-pro-btn:hover, .xvm-pro-btn-primary:hover { filter: brightness(1.05); }
+    .xvm-pro-activate { margin-top: 8px; }
+    .xvm-pro-act-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .xvm-pro-act-row { display: flex; gap: 6px; }
+    .xvm-pro-act-row input {
+      flex: 1; padding: 5px 7px; border: 1px solid var(--line);
+      border-radius: 5px; font: inherit; font-size: 12px;
+    }
+    .xvm-pro-act-row button {
+      padding: 5px 10px; border: 1px solid var(--accent);
+      background: var(--accent); color: #fff;
+      border-radius: 5px; cursor: pointer; font-size: 12px;
+    }
+    .xvm-pro-act-row button:disabled { opacity: 0.6; cursor: progress; }
+    .xvm-pro-msg { margin-top: 6px; font-size: 11px; min-height: 14px; }
+    .xvm-pro-msg[data-kind="ok"]  { color: #2a7f3f; }
+    .xvm-pro-msg[data-kind="err"] { color: #b14a2a; }
+    .xvm-pro-licbox { margin-top: 8px; padding: 8px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+    .xvm-pro-licrow { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; color: var(--muted); }
+    .xvm-pro-licrow code { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+
+    /* Rate filter settings section (#45 step 3 — popup wiring) */
+    .rf-section { margin: 0 0 14px; }
+    .rf-title { font-size: 13px; margin: 0 0 6px; color: var(--text); }
+    .rf-section[data-locked="1"] { opacity: 0.55; }
+    .rf-section[data-locked="1"] input, .rf-section[data-locked="1"] button { cursor: not-allowed; }
+    .rf-locked-hint {
+      margin: 0 0 8px; padding: 6px 8px; border-radius: 6px;
+      background: #fff4e6; color: var(--accent-strong);
+      font-size: 11px; border: 1px dashed var(--accent);
+    }
+    .rf-toggle { margin-bottom: 6px; font-weight: 600; }
+    .rf-fieldset {
+      border: 1px solid var(--line); border-radius: 6px;
+      padding: 6px 10px 8px; margin: 0 0 8px;
+    }
+    .rf-fieldset legend { padding: 0 4px; font-size: 11px; color: var(--muted); }
+    .rf-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; font-size: 12px; }
+    .rf-row input[type="number"] {
+      width: 96px; padding: 3px 6px; border: 1px solid var(--line);
+      border-radius: 4px; font: inherit; text-align: right;
+    }
+    .rf-rule-hint { font-size: 11px; color: var(--muted); margin: 4px 0 8px; }
+    .rf-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .rf-btn, .rf-btn-ghost {
+      padding: 5px 10px; border-radius: 5px; font-size: 12px;
+      cursor: pointer; border: 1px solid var(--accent);
+    }
+    .rf-btn { background: var(--accent); color: #fff; }
+    .rf-btn-ghost { background: #fff; color: var(--accent-strong); }
+    .rf-msg { margin-top: 6px; font-size: 11px; min-height: 14px; }
+    .rf-msg[data-kind="ok"]  { color: #2a7f3f; }
+    .rf-msg[data-kind="err"] { color: #b14a2a; }
+
+    /* Leaderboard reset position button (#45 dev3 UX add-on) */
+    .ft-lb-reset { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .ft-lb-reset-btn {
+      padding: 4px 10px; border-radius: 5px;
+      border: 1px solid var(--line); background: #fff; color: var(--text);
+      font-size: 12px; cursor: pointer;
+    }
+    .ft-lb-reset-btn:hover { border-color: var(--accent); color: var(--accent-strong); }
+    .ft-lb-reset-msg { font-size: 11px; color: #2a7f3f; }
   </style>
 </head>
 <body>
   <div class="popup">
     <h1 data-i18n="extName">X Viral Monitor</h1>
     <p class="subtitle" data-i18n="popupSubtitle">Real-time impression velocity on X tweets</p>
+
+    <!-- XVM Pro tier banner + activation (rendered by src/premium/license/popup-pro.js) -->
+    <section id="xvm-pro-section" data-tier="free"></section>
+
+    <!-- Rate filter settings (rendered by src/premium/rate-filter/popup-rate-filter.js) -->
+    <section id="rate-filter-section" class="rf-section" data-locked="0"></section>
 
     <div class="info-box">
       <div class="tier"><span class="icon">🌱</span><span class="label" data-i18n="tierNormal">Normal</span><span class="range" id="range-green">< 1,000/h</span></div>
@@ -436,10 +543,17 @@
           <div class="ft-lb-cols-hint" data-i18n="featureLeaderboardColsHint">Drag to reorder · check to show</div>
           <ul id="lb-col-list" class="col-list"></ul>
         </div>
+        <div class="ft-lb-reset">
+          <button type="button" id="lb-reset-pos" class="ft-lb-reset-btn" data-i18n="featureLeaderboardResetPos">Reset leaderboard position</button>
+          <span class="ft-lb-reset-msg" id="lb-reset-msg"></span>
+        </div>
       </div>
     </div>
   </div>
 
+  <script src="src/premium/license/tier-logic.js"></script>
+  <script src="src/premium/license/popup-pro.js"></script>
+  <script src="src/premium/rate-filter/popup-rate-filter.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
