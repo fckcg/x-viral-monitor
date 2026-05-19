@@ -17,22 +17,16 @@
   const BUY_URL_MONTHLY = 'https://www.creem.io/payment/prod_7f7t9EHK3RJlOK37DWr7J';
   const BUY_URL_ANNUAL  = 'https://www.creem.io/payment/prod_69yTiXGXb04DKm46DNVbN9';
 
-  // Client-side product scoping (mirror of isolated.js XVM_PRODUCT_IDS).
-  // Shared Worker between x-md-paste and XVM Pro means an x-md-paste
-  // license could otherwise activate XVM Pro. Contract test pins the
-  // mirror to isolated.js.
-  const XVM_PRODUCT_IDS = [
-    'prod_7f7t9EHK3RJlOK37DWr7J',
-    'prod_69yTiXGXb04DKm46DNVbN9',
-  ];
-  function isXvmProduct(productId) {
-    return typeof productId === 'string' && XVM_PRODUCT_IDS.includes(productId);
+  // All tier-resolution logic lives in tier-logic.js (loaded BEFORE us via
+  // <script> in popup.html). Single source of truth; eliminates mirror
+  // drift between this file and isolated.js.
+  const TL = globalThis.__xvmTierLogic;
+  if (!TL) {
+    console.error('[xvm pro] tier-logic.js not loaded before popup-pro.js — popup.html script order broken');
+    return;
   }
+  const { isXvmProduct, licenseStatusFrom, resolveTierFrom } = TL;
 
-  const TRIAL_DAYS = 14;
-  const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
-  const RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-  const OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
   const STORAGE_KEY = 'xvm_license_v1';
   const TRIAL_KEY = 'xvm_trial_v1';
   const KEY_RE = /^[A-Za-z0-9_\-]{8,128}$/;
@@ -61,33 +55,23 @@
       catch (_) { resolve(); }
     });
   }
+  // Non-blocker #2 fix: deactivate previously used a bare chrome.storage.local.remove.
+  // Wrap consistently so an unavailable storage layer doesn't throw.
+  function storageRemove(key) {
+    return new Promise((resolve) => {
+      try { chrome.storage.local.remove(key, resolve); }
+      catch (_) { resolve(); }
+    });
+  }
 
-  // ─── Tier resolver (mirror of isolated.js — same invariants) ────────
-  function trialStatus(rec) {
-    if (!rec || !Number.isFinite(rec.startAt)) return { isTrialing: false, daysLeft: 0 };
-    const msLeft = TRIAL_MS - (Date.now() - rec.startAt);
-    if (msLeft <= 0) return { isTrialing: false, daysLeft: 0 };
-    return { isTrialing: true, daysLeft: Math.ceil(msLeft / 86400000) };
-  }
-  async function getLicenseStatus() {
-    const stored = await storageGet(STORAGE_KEY, null);
-    if (!stored?.key || !stored?.instanceId) return { tier: 'free', record: null, source: 'none' };
-    if (stored.productId && !isXvmProduct(stored.productId)) {
-      return { tier: 'free', record: stored, source: 'wrong_product' };
-    }
-    const sinceCheck = Date.now() - (stored.lastChecked || 0);
-    if (stored.status && stored.status !== 'active') return { tier: 'free', record: stored, source: 'expired' };
-    if (sinceCheck <= RECHECK_INTERVAL_MS) return { tier: 'pro', record: stored, source: 'cached' };
-    if (sinceCheck > OFFLINE_GRACE_MS) return { tier: 'free', record: stored, source: 'expired' };
-    return { tier: 'pro', record: stored, source: 'offline-grace' };
-  }
+  // ─── Tier resolver — delegates to tier-logic.js pure helpers ────────
   async function resolveTier() {
-    const lic = await getLicenseStatus();
-    if (lic.tier === 'pro') return { tier: 'pro', daysLeft: 0, source: lic.source, record: lic.record };
-    const trial = await storageGet(TRIAL_KEY, null);
-    const t = trialStatus(trial);
-    if (t.isTrialing) return { tier: 'trial', daysLeft: t.daysLeft, source: 'trial', record: lic.record };
-    return { tier: 'free', daysLeft: 0, source: 'none', record: lic.record };
+    const stored = await storageGet(STORAGE_KEY, null);
+    const trial  = await storageGet(TRIAL_KEY, null);
+    // Non-blocker #3 fix: tier-logic.js threads lic.source (expired /
+    // wrong_product / etc.) through the free path, so popup diagnostics
+    // are now accurate.
+    return resolveTierFrom(stored, trial, Date.now());
   }
 
   // ─── Activate via Worker proxy ──────────────────────────────────────
@@ -144,7 +128,7 @@
         });
       } catch (_) {}
     }
-    await new Promise((r) => chrome.storage.local.remove(STORAGE_KEY, r));
+    await storageRemove(STORAGE_KEY);
     return { ok: true };
   }
 

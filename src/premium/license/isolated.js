@@ -34,26 +34,15 @@
   // in production, the build script failed to substitute.
   const LICENSE_PROXY_URL = 'https://xmp-license.lengkuxiaomao.workers.dev';
 
-  // Client-side product scoping (#45 follow-up: shared Worker between
-  // x-md-paste and XVM Pro). The Worker now whitelists multiple products
-  // across both extensions; without this check an x-md-paste license
-  // would activate XVM Pro just because the Worker accepted it.
-  // Must mirror popup-pro.js XVM_PRODUCT_IDS exactly (contract test pins).
-  const XVM_PRODUCT_IDS = [
-    'prod_7f7t9EHK3RJlOK37DWr7J', // XVM Pro Monthly
-    'prod_69yTiXGXb04DKm46DNVbN9', // XVM Pro Annual
-  ];
-
-  function isXvmProduct(productId) {
-    return typeof productId === 'string' && XVM_PRODUCT_IDS.includes(productId);
+  // All tier-resolution logic lives in tier-logic.js (loaded BEFORE us per
+  // manifest content_scripts order). Pulling from globalThis keeps both
+  // contexts (isolated + popup) on a single source of truth.
+  const TL = globalThis.__xvmTierLogic;
+  if (!TL) {
+    console.error('[xvm pro] tier-logic.js not loaded before isolated.js — manifest content_scripts order broken');
+    return;
   }
-
-  const TRIAL_DAYS         = 14;
-  const TRIAL_MS           = TRIAL_DAYS * 24 * 60 * 60 * 1000;
-  // Cache live licenses for 24h before revalidating (ADR-0004).
-  const RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-  // After 7 days fully offline, drop back to free even with a cached license.
-  const OFFLINE_GRACE_MS    = 7 * 24 * 60 * 60 * 1000;
+  const { isXvmProduct, trialStatus, licenseStatusFrom, resolveTierFrom } = TL;
 
   const STORAGE_KEY    = 'xvm_license_v1';
   const TRIAL_KEY      = 'xvm_trial_v1';
@@ -88,6 +77,7 @@
   }
 
   // ─── Trial state machine ────────────────────────────────────────────
+  // trialStatus pure helper imported from tier-logic.js above.
   async function ensureTrialStarted() {
     let rec = await safeStorageGet(TRIAL_KEY, null);
     if (!rec || !Number.isFinite(rec.startAt)) {
@@ -95,16 +85,6 @@
       await safeStorageSet({ [TRIAL_KEY]: rec });
     }
     return rec;
-  }
-
-  function trialStatus(rec) {
-    if (!rec || !Number.isFinite(rec.startAt)) {
-      return { isTrialing: false, daysLeft: 0 };
-    }
-    const elapsed = Date.now() - rec.startAt;
-    const msLeft = TRIAL_MS - elapsed;
-    if (msLeft <= 0) return { isTrialing: false, daysLeft: 0 };
-    return { isTrialing: true, daysLeft: Math.ceil(msLeft / 86400000) };
   }
 
   // ─── Creem proxy ────────────────────────────────────────────────────
@@ -215,44 +195,29 @@
     pushTier();
   }
 
-  // ─── License status read ────────────────────────────────────────────
+  // ─── License status + tier resolver ─────────────────────────────────
+  // Pure logic lives in tier-logic.js. We only do storage I/O + the
+  // side-effecting background revalidate.
   async function getLicenseStatus() {
     const stored = await safeStorageGet(STORAGE_KEY, null);
-    if (!stored?.key || !stored?.instanceId) {
-      return { tier: 'free', record: null, source: 'none' };
+    const status = licenseStatusFrom(stored, Date.now());
+    // Stale-cache side-effect: kick off background revalidate. The pure
+    // helper just reports the verdict; we own the I/O.
+    if (status.source === 'offline-grace' && stored) {
+      revalidateInBackground(stored).catch(() => {});
     }
-    // Cached productId scoping check — defends against a stored record
-    // from an older Worker build that didn't enforce productId (or a
-    // tamper-by-user via DevTools storage editor). Pro requires a real
-    // XVM product id; otherwise drop to free immediately.
-    if (stored.productId && !isXvmProduct(stored.productId)) {
-      return { tier: 'free', record: stored, source: 'wrong_product' };
-    }
-    const sinceCheck = Date.now() - (stored.lastChecked || 0);
-    const isStale     = sinceCheck > RECHECK_INTERVAL_MS;
-    const beyondGrace = sinceCheck > OFFLINE_GRACE_MS;
-    if (stored.status && stored.status !== 'active') {
-      return { tier: 'free', record: stored, source: 'expired' };
-    }
-    if (!isStale) {
-      return { tier: 'pro', record: stored, source: 'cached' };
-    }
-    // Stale → kick off background revalidate; serve current best guess.
-    revalidateInBackground(stored).catch(() => {});
-    if (beyondGrace) return { tier: 'free', record: stored, source: 'expired' };
-    return { tier: 'pro', record: stored, source: 'offline-grace' };
+    return status;
   }
 
-  // ─── Tier resolver (the one place tier is computed) ─────────────────
-  // ADR-0004 invariant: tier is a deterministic function of (license, trial).
-  // Pro wins over trial wins over free.
   async function resolveTier() {
-    const lic = await getLicenseStatus();
-    if (lic.tier === 'pro') return { tier: 'pro', daysLeft: 0, source: lic.source, record: lic.record };
+    const stored = await safeStorageGet(STORAGE_KEY, null);
     const trial = await safeStorageGet(TRIAL_KEY, null);
-    const t = trialStatus(trial);
-    if (t.isTrialing) return { tier: 'trial', daysLeft: t.daysLeft, source: 'trial', record: lic.record };
-    return { tier: 'free', daysLeft: 0, source: lic.source || 'none', record: lic.record };
+    const r = resolveTierFrom(stored, trial, Date.now());
+    // Side-effect: if the verdict served from offline-grace, kick revalidate.
+    if (r.source === 'offline-grace' && stored) {
+      revalidateInBackground(stored).catch(() => {});
+    }
+    return r;
   }
 
   // ─── Push tier to MAIN world ────────────────────────────────────────

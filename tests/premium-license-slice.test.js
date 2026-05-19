@@ -55,10 +55,8 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
     ).toBe(true);
   });
 
-  it('isolated.js implements 24h cache + 7-day offline grace per ADR-0004', () => {
-    // Extract the const initializer expression and evaluate the integer
-    // product. Length-agnostic so future tweaks (e.g. extra factor) still
-    // pass as long as the resolved milliseconds match.
+  it('tier-logic.js implements 24h cache + 7-day offline grace per ADR-0004', () => {
+    const tier = readFileSync(resolve(repo, 'src/premium/license/tier-logic.js'), 'utf8');
     function intProduct(src, name) {
       const re = new RegExp(`${name}\\s*=\\s*([0-9 *]+);`);
       const m = src.match(re);
@@ -67,17 +65,18 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
       if (factors.some((n) => !Number.isFinite(n))) return null;
       return factors.reduce((a, b) => a * b, 1);
     }
-    expect(intProduct(isolated, 'RECHECK_INTERVAL_MS'),
+    expect(intProduct(tier, 'RECHECK_INTERVAL_MS'),
       'RECHECK_INTERVAL_MS must equal 24 hours in ms'
     ).toBe(24 * 60 * 60 * 1000);
-    expect(intProduct(isolated, 'OFFLINE_GRACE_MS'),
+    expect(intProduct(tier, 'OFFLINE_GRACE_MS'),
       'OFFLINE_GRACE_MS must equal 7 days in ms'
     ).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
-  it('isolated.js implements 14-day trial state machine', () => {
-    expect(/TRIAL_DAYS\s*=\s*14/.test(isolated),
-      'isolated.js must declare 14-day trial window'
+  it('tier-logic.js declares 14-day trial; isolated.js seeds the timestamp', () => {
+    const tier = readFileSync(resolve(repo, 'src/premium/license/tier-logic.js'), 'utf8');
+    expect(/TRIAL_DAYS\s*=\s*14/.test(tier),
+      'tier-logic.js must declare 14-day trial window'
     ).toBe(true);
     expect(/ensureTrialStarted/.test(isolated),
       'isolated.js must have ensureTrialStarted() seeding trialStartAt on first run'
@@ -92,14 +91,13 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
     ).toBe(true);
   });
 
-  it('isolated.js has ONE tier resolution function (single source of truth)', () => {
-    // The function name is `resolveTier` and it should be the only place
-    // that combines license + trial into a tier verdict.
-    const calls = (isolated.match(/resolveTier\s*\(/g) || []).length;
+  it('isolated.js exposes async resolveTier() that delegates to tier-logic.resolveTierFrom', () => {
     expect(/async\s+function\s+resolveTier\s*\(\s*\)/.test(isolated),
-      'isolated.js must define resolveTier() as the single tier resolver'
+      'isolated.js must define async resolveTier() wrapper'
     ).toBe(true);
-    expect(calls).toBeGreaterThanOrEqual(2); // definition + at least one call
+    expect(/resolveTierFrom\s*\(/.test(isolated),
+      'isolated.js resolveTier() must delegate to tier-logic.js resolveTierFrom'
+    ).toBe(true);
   });
 
   it('isolated.js exposes the documented message contract', () => {
@@ -143,38 +141,54 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
     ).toBe(true);
   });
 
-  it('isolated.js + popup-pro.js BOTH enforce XVM productId scoping (#45 shared-Worker follow-up)', () => {
-    // Shared Worker between x-md-paste and XVM means client-side scoping
-    // is REQUIRED to prevent an x-md-paste license from activating XVM.
+  it('XVM_PRODUCT_IDS lives in tier-logic.js (single source) — both XVM products present', () => {
+    // Codex Blocker #1 refactor: scoping whitelist moved from
+    // isolated.js + popup-pro.js mirror to a single tier-logic.js
+    // declaration. Pure-module tests in premium-resolveTier.test.js
+    // exercise scope behavior; this just pins the file location.
+    const tier = readFileSync(resolve(repo, 'src/premium/license/tier-logic.js'), 'utf8');
+    expect(/XVM_PRODUCT_IDS\s*=\s*\[/.test(tier),
+      'tier-logic.js must declare XVM_PRODUCT_IDS whitelist'
+    ).toBe(true);
+    expect(tier.includes('prod_7f7t9EHK3RJlOK37DWr7J'),
+      'tier-logic.js whitelist must contain Monthly product ID'
+    ).toBe(true);
+    expect(tier.includes('prod_69yTiXGXb04DKm46DNVbN9'),
+      'tier-logic.js whitelist must contain Annual product ID'
+    ).toBe(true);
+    expect(/function\s+isXvmProduct\s*\(/.test(tier),
+      'tier-logic.js must define isXvmProduct() helper'
+    ).toBe(true);
+  });
+
+  it('isolated.js + popup-pro.js delegate to tier-logic.js (no inline duplicates)', () => {
     const popup = readFileSync(resolve(repo, 'src/premium/license/popup-pro.js'), 'utf8');
     for (const [name, body] of [['isolated.js', isolated], ['popup-pro.js', popup]]) {
-      expect(/XVM_PRODUCT_IDS/.test(body),
-        `${name} must declare XVM_PRODUCT_IDS whitelist`
+      expect(/globalThis\.__xvmTierLogic/.test(body),
+        `${name} must pull from globalThis.__xvmTierLogic`
       ).toBe(true);
-      expect(/isXvmProduct/.test(body),
-        `${name} must use isXvmProduct() helper`
-      ).toBe(true);
-      expect(body.includes('prod_7f7t9EHK3RJlOK37DWr7J'),
-        `${name} whitelist must contain Monthly product ID`
-      ).toBe(true);
-      expect(body.includes('prod_69yTiXGXb04DKm46DNVbN9'),
-        `${name} whitelist must contain Annual product ID`
-      ).toBe(true);
+      // Negative: must NOT inline its own XVM_PRODUCT_IDS array.
+      expect(/XVM_PRODUCT_IDS\s*=\s*\[/.test(body),
+        `${name} must NOT redeclare XVM_PRODUCT_IDS — single source is tier-logic.js`
+      ).toBe(false);
+      // Negative: must NOT inline its own pure tier helpers.
+      expect(/function\s+licenseStatusFrom\s*\(/.test(body),
+        `${name} must NOT define licenseStatusFrom — comes from tier-logic.js`
+      ).toBe(false);
+      expect(/function\s+resolveTierFrom\s*\(/.test(body),
+        `${name} must NOT define resolveTierFrom — comes from tier-logic.js`
+      ).toBe(false);
     }
   });
 
-  it('isolated.js + popup-pro.js XVM_PRODUCT_IDS arrays match exactly', () => {
-    const popup = readFileSync(resolve(repo, 'src/premium/license/popup-pro.js'), 'utf8');
-    function extractIds(src) {
-      const m = src.match(/XVM_PRODUCT_IDS\s*=\s*\[([\s\S]*?)\]/);
-      if (!m) return null;
-      return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]).sort();
-    }
-    const a = extractIds(isolated);
-    const b = extractIds(popup);
-    expect(a, 'isolated.js must declare XVM_PRODUCT_IDS array').not.toBeNull();
-    expect(b, 'popup-pro.js must declare XVM_PRODUCT_IDS array').not.toBeNull();
-    expect(a).toEqual(b);
+  it('tier-logic.js is dual-mode (globalThis + CommonJS)', () => {
+    const tier = readFileSync(resolve(repo, 'src/premium/license/tier-logic.js'), 'utf8');
+    expect(/root\.__xvmTierLogic\s*=\s*api/.test(tier),
+      'tier-logic.js must expose api on globalThis.__xvmTierLogic'
+    ).toBe(true);
+    expect(/module\.exports\s*=\s*api/.test(tier),
+      'tier-logic.js must also CommonJS-export api for vitest'
+    ).toBe(true);
   });
 
   it('gate.js still single entry — filter.js does not call client/isolated APIs directly', () => {

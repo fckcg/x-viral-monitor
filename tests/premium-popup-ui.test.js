@@ -53,20 +53,25 @@ describe('#45 step 3 — popup pro UI', () => {
     expect(a).toBe(b);
   });
 
-  it('popup-pro.js mirrors RECHECK_INTERVAL_MS / OFFLINE_GRACE_MS / TRIAL_DAYS', () => {
-    // Mirrors are intentional duplicates with isolated.js for the popup
-    // context. Drift between popup and isolated would create a "tier
-    // inconsistency" UX bug. If you change one, change both — and these
-    // tests will fail until you do.
-    expect(/RECHECK_INTERVAL_MS\s*=\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(js),
-      'popup-pro.js must declare RECHECK_INTERVAL_MS = 24h'
+  it('popup-pro.js delegates tier resolution to tier-logic.js (no inline duplication)', () => {
+    // After the Codex Blocker #1 refactor, RECHECK_INTERVAL_MS /
+    // OFFLINE_GRACE_MS / TRIAL_DAYS are owned by tier-logic.js only.
+    // popup-pro.js must (a) pull from globalThis.__xvmTierLogic and
+    // (b) not redeclare those constants.
+    expect(/globalThis\.__xvmTierLogic/.test(js),
+      'popup-pro.js must pull tier helpers from globalThis.__xvmTierLogic'
     ).toBe(true);
-    expect(/OFFLINE_GRACE_MS\s*=\s*7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(js),
-      'popup-pro.js must declare OFFLINE_GRACE_MS = 7d'
+    expect(/resolveTierFrom/.test(js),
+      'popup-pro.js must call resolveTierFrom (tier-logic.js)'
     ).toBe(true);
-    expect(/TRIAL_DAYS\s*=\s*14/.test(js),
-      'popup-pro.js must declare TRIAL_DAYS = 14'
-    ).toBe(true);
+    // Negative: no inline duplicates.
+    expect(/function\s+trialStatus\s*\(/.test(js),
+      'popup-pro.js must NOT define its own trialStatus()'
+    ).toBe(false);
+    expect(/function\s+resolveTier(?:From)?\s*\(/.test(js)
+      && !/async\s+function\s+resolveTier\s*\(\s*\)/.test(js),
+      'popup-pro.js may only have the async resolveTier wrapper, not a pure resolveTierFrom redefinition'
+    ).toBe(false);
   });
 
   it('popup-pro.js wires both Creem payment URLs', () => {
