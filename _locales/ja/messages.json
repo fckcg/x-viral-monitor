@@ -321,5 +321,29 @@
   },
   "flashBadgeStyleSaved": {
     "message": "バッジスタイルを保存しました ✓"
-  }
+  },
+  "proBannerFree":       { "message": "無料版" },
+  "proBannerPro":        { "message": "Pro 有効" },
+  "proBannerTrial":      { "message": "トライアル — 残り $DAYS$ 日", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proBannerTrialOne":   { "message": "トライアル — 残り 1 日" },
+  "proNudgeTrialEnd":    { "message": "トライアル残り $DAYS$ 日 — Pro にアップグレードしてフィルタを継続。", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proNudgeTrialEndOne": { "message": "トライアル残り 1 日 — Pro にアップグレードしてフィルタを継続。" },
+  "proCtaMonthly":       { "message": "月額 · $9 / 月" },
+  "proCtaAnnual":        { "message": "年額 · $90 / 年 (17% お得)" },
+  "proActivateLabel":    { "message": "購入済みですか? ライセンスキーを入力:" },
+  "proActivatePlaceholder": { "message": "creem-XXXXX..." },
+  "proActivateBtn":      { "message": "有効化" },
+  "proActivating":       { "message": "有効化中…" },
+  "proActivatedOk":      { "message": "ライセンスを有効化しました。x.com を再読み込みしてください。" },
+  "proActErrFormat":     { "message": "ライセンスキーの形式が正しくありません。" },
+  "proActErrWorkerUnset":{ "message": "ライセンスプロキシ未設定 — サポートにご連絡ください。" },
+  "proActErrGeneric":    { "message": "有効化失敗: $ERROR$", "placeholders": { "ERROR": { "content": "$1" } } },
+  "proLicenseField":     { "message": "ライセンス" },
+  "proActivatedField":   { "message": "有効化日" },
+  "proExpiresField":     { "message": "更新日" },
+  "proManageBtn":        { "message": "サブスクリプション管理" },
+  "proDeactivateBtn":    { "message": "無効化" },
+  "proDeactivating":     { "message": "無効化中…" },
+  "proDeactivatedOk":    { "message": "無効化しました。" },
+  "proDeactivateErr":    { "message": "無効化に失敗しました。" }
 }

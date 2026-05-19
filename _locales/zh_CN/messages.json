@@ -321,5 +321,29 @@
   },
   "flashBadgeStyleSaved": {
     "message": "徽章样式已保存 ✓"
-  }
+  },
+  "proBannerFree":       { "message": "免费版" },
+  "proBannerPro":        { "message": "Pro 已激活" },
+  "proBannerTrial":      { "message": "试用中 — 还剩 $DAYS$ 天", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proBannerTrialOne":   { "message": "试用中 — 还剩 1 天" },
+  "proNudgeTrialEnd":    { "message": "试用还剩 $DAYS$ 天,升级 Pro 不中断流速过滤。", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proNudgeTrialEndOne": { "message": "试用还剩 1 天,升级 Pro 不中断流速过滤。" },
+  "proCtaMonthly":       { "message": "月度 · $9 / 月" },
+  "proCtaAnnual":        { "message": "年度 · $90 / 年 (立省 17%)" },
+  "proActivateLabel":    { "message": "已购买? 在这里输入 license key:" },
+  "proActivatePlaceholder": { "message": "creem-XXXXX..." },
+  "proActivateBtn":      { "message": "激活" },
+  "proActivating":       { "message": "正在激活…" },
+  "proActivatedOk":      { "message": "激活成功,刷新 x.com 后生效。" },
+  "proActErrFormat":     { "message": "License key 格式不正确。" },
+  "proActErrWorkerUnset":{ "message": "License 代理尚未配置 — 请联系客服。" },
+  "proActErrGeneric":    { "message": "激活失败: $ERROR$", "placeholders": { "ERROR": { "content": "$1" } } },
+  "proLicenseField":     { "message": "License" },
+  "proActivatedField":   { "message": "激活时间" },
+  "proExpiresField":     { "message": "续费时间" },
+  "proManageBtn":        { "message": "管理订阅" },
+  "proDeactivateBtn":    { "message": "取消激活" },
+  "proDeactivating":     { "message": "正在取消…" },
+  "proDeactivatedOk":    { "message": "已取消激活。" },
+  "proDeactivateErr":    { "message": "取消激活失败。" }
 }

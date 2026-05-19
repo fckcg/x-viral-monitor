@@ -132,6 +132,40 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
     ).toBe(true);
   });
 
+  it('isolated.js + popup-pro.js BOTH enforce XVM productId scoping (#45 shared-Worker follow-up)', () => {
+    // Shared Worker between x-md-paste and XVM means client-side scoping
+    // is REQUIRED to prevent an x-md-paste license from activating XVM.
+    const popup = readFileSync(resolve(repo, 'src/premium/license/popup-pro.js'), 'utf8');
+    for (const [name, body] of [['isolated.js', isolated], ['popup-pro.js', popup]]) {
+      expect(/XVM_PRODUCT_IDS/.test(body),
+        `${name} must declare XVM_PRODUCT_IDS whitelist`
+      ).toBe(true);
+      expect(/isXvmProduct/.test(body),
+        `${name} must use isXvmProduct() helper`
+      ).toBe(true);
+      expect(body.includes('prod_7f7t9EHK3RJlOK37DWr7J'),
+        `${name} whitelist must contain Monthly product ID`
+      ).toBe(true);
+      expect(body.includes('prod_69yTiXGXb04DKm46DNVbN9'),
+        `${name} whitelist must contain Annual product ID`
+      ).toBe(true);
+    }
+  });
+
+  it('isolated.js + popup-pro.js XVM_PRODUCT_IDS arrays match exactly', () => {
+    const popup = readFileSync(resolve(repo, 'src/premium/license/popup-pro.js'), 'utf8');
+    function extractIds(src) {
+      const m = src.match(/XVM_PRODUCT_IDS\s*=\s*\[([\s\S]*?)\]/);
+      if (!m) return null;
+      return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]).sort();
+    }
+    const a = extractIds(isolated);
+    const b = extractIds(popup);
+    expect(a, 'isolated.js must declare XVM_PRODUCT_IDS array').not.toBeNull();
+    expect(b, 'popup-pro.js must declare XVM_PRODUCT_IDS array').not.toBeNull();
+    expect(a).toEqual(b);
+  });
+
   it('gate.js still single entry — filter.js does not call client/isolated APIs directly', () => {
     // Filter should NOT postMessage XVM_LICENSE_* (that's UI responsibility).
     expect(/XVM_LICENSE_ACTIVATE|XVM_LICENSE_DEACTIVATE/.test(filter),

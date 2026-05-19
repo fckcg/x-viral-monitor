@@ -75,4 +75,29 @@ describe('#45 step 3 — popup pro UI', () => {
       'popup-pro.js must show a nudge when daysLeft ≤ 3'
     ).toBe(true);
   });
+
+  it('popup-pro.js uses chrome.i18n.getMessage (i18n wired)', () => {
+    expect(/chrome\?\.i18n\?\.getMessage/.test(js),
+      'popup-pro.js must call chrome.i18n.getMessage for localized strings'
+    ).toBe(true);
+  });
+
+  it('zh_CN + en locales declare the pro i18n keys', () => {
+    const en = JSON.parse(readFileSync(resolve(repo, '_locales/en/messages.json'), 'utf8'));
+    const zh = JSON.parse(readFileSync(resolve(repo, '_locales/zh_CN/messages.json'), 'utf8'));
+    const required = [
+      'proBannerFree', 'proBannerPro', 'proBannerTrial', 'proBannerTrialOne',
+      'proNudgeTrialEnd', 'proNudgeTrialEndOne',
+      'proCtaMonthly', 'proCtaAnnual',
+      'proActivateLabel', 'proActivateBtn', 'proActivating', 'proActivatedOk',
+      'proActErrFormat', 'proActErrWorkerUnset', 'proActErrGeneric',
+      'proLicenseField', 'proActivatedField', 'proExpiresField',
+      'proManageBtn', 'proDeactivateBtn', 'proDeactivating', 'proDeactivatedOk',
+      'proDeactivateErr',
+    ];
+    for (const key of required) {
+      expect(en[key]?.message, `en/messages.json must declare ${key}`).toBeTruthy();
+      expect(zh[key]?.message, `zh_CN/messages.json must declare ${key}`).toBeTruthy();
+    }
+  });
 });

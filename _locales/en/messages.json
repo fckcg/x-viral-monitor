@@ -323,5 +323,29 @@
   },
   "flashBadgeStyleSaved": {
     "message": "Badge style saved ✓"
-  }
+  },
+  "proBannerFree":       { "message": "Free" },
+  "proBannerPro":        { "message": "Pro active" },
+  "proBannerTrial":      { "message": "Trial — $DAYS$ days left", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proBannerTrialOne":   { "message": "Trial — 1 day left" },
+  "proNudgeTrialEnd":    { "message": "Trial ends in $DAYS$ days — upgrade Pro to keep filtering.", "placeholders": { "DAYS": { "content": "$1" } } },
+  "proNudgeTrialEndOne": { "message": "Trial ends in 1 day — upgrade Pro to keep filtering." },
+  "proCtaMonthly":       { "message": "Monthly · $9 / mo" },
+  "proCtaAnnual":        { "message": "Annual · $90 / yr (save 17%)" },
+  "proActivateLabel":    { "message": "Already bought? Enter your license key:" },
+  "proActivatePlaceholder": { "message": "creem-XXXXX..." },
+  "proActivateBtn":      { "message": "Activate" },
+  "proActivating":       { "message": "Activating…" },
+  "proActivatedOk":      { "message": "License activated. Reload x.com to apply." },
+  "proActErrFormat":     { "message": "License key format is invalid." },
+  "proActErrWorkerUnset":{ "message": "License proxy not configured yet — contact support." },
+  "proActErrGeneric":    { "message": "Activation failed: $ERROR$", "placeholders": { "ERROR": { "content": "$1" } } },
+  "proLicenseField":     { "message": "License" },
+  "proActivatedField":   { "message": "Activated" },
+  "proExpiresField":     { "message": "Renews" },
+  "proManageBtn":        { "message": "Manage subscription" },
+  "proDeactivateBtn":    { "message": "Deactivate" },
+  "proDeactivating":     { "message": "Deactivating…" },
+  "proDeactivatedOk":    { "message": "Deactivated." },
+  "proDeactivateErr":    { "message": "Deactivation failed." }
 }

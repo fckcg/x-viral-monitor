@@ -17,6 +17,18 @@
   const BUY_URL_MONTHLY = 'https://www.creem.io/payment/prod_7f7t9EHK3RJlOK37DWr7J';
   const BUY_URL_ANNUAL  = 'https://www.creem.io/payment/prod_69yTiXGXb04DKm46DNVbN9';
 
+  // Client-side product scoping (mirror of isolated.js XVM_PRODUCT_IDS).
+  // Shared Worker between x-md-paste and XVM Pro means an x-md-paste
+  // license could otherwise activate XVM Pro. Contract test pins the
+  // mirror to isolated.js.
+  const XVM_PRODUCT_IDS = [
+    'prod_7f7t9EHK3RJlOK37DWr7J',
+    'prod_69yTiXGXb04DKm46DNVbN9',
+  ];
+  function isXvmProduct(productId) {
+    return typeof productId === 'string' && XVM_PRODUCT_IDS.includes(productId);
+  }
+
   const TRIAL_DAYS = 14;
   const TRIAL_MS = TRIAL_DAYS * 24 * 60 * 60 * 1000;
   const RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -24,6 +36,17 @@
   const STORAGE_KEY = 'xvm_license_v1';
   const TRIAL_KEY = 'xvm_trial_v1';
   const KEY_RE = /^[A-Za-z0-9_\-]{8,128}$/;
+
+  // chrome.i18n wrapper — falls back to the key itself if the locale file
+  // is missing the entry (defensive; never block rendering on a stray
+  // i18n miss).
+  function t(key, ...subs) {
+    try {
+      const v = chrome?.i18n?.getMessage?.(key, subs.length ? subs.map(String) : undefined);
+      if (v) return v;
+    } catch (_) {}
+    return key;
+  }
 
   // ─── chrome.storage promises ────────────────────────────────────────
   function storageGet(key, fallback) {
@@ -49,6 +72,9 @@
   async function getLicenseStatus() {
     const stored = await storageGet(STORAGE_KEY, null);
     if (!stored?.key || !stored?.instanceId) return { tier: 'free', record: null, source: 'none' };
+    if (stored.productId && !isXvmProduct(stored.productId)) {
+      return { tier: 'free', record: stored, source: 'wrong_product' };
+    }
     const sinceCheck = Date.now() - (stored.lastChecked || 0);
     if (stored.status && stored.status !== 'active') return { tier: 'free', record: stored, source: 'expired' };
     if (sinceCheck <= RECHECK_INTERVAL_MS) return { tier: 'pro', record: stored, source: 'cached' };
@@ -89,6 +115,9 @@
     }
     if (!envelope?.ok) return { ok: false, error: 'activation_failed', detail: envelope };
     const data = envelope.data || {};
+    if (data.product_id && !isXvmProduct(data.product_id)) {
+      return { ok: false, error: 'wrong_product', detail: { actual: data.product_id } };
+    }
     const inst = data.instance || {};
     const record = {
       key, instanceId: inst.id || null, instanceName: inst.name || null,
@@ -137,17 +166,23 @@
     const banner = document.createElement('div');
     banner.className = 'xvm-pro-banner';
     let tierLabel, tierIcon;
-    if (tier === 'pro')        { tierLabel = 'Pro'; tierIcon = '✨'; }
-    else if (tier === 'trial') { tierLabel = `Trial — ${days} day${days === 1 ? '' : 's'} left`; tierIcon = '⏳'; }
-    else                       { tierLabel = 'Free'; tierIcon = '🌱'; }
-    banner.innerHTML = `<span class="xvm-pro-icon">${tierIcon}</span> <span class="xvm-pro-tier">${tierLabel}</span>`;
+    if (tier === 'pro') {
+      tierLabel = t('proBannerPro'); tierIcon = '✨';
+    } else if (tier === 'trial') {
+      tierLabel = days === 1 ? t('proBannerTrialOne') : t('proBannerTrial', days);
+      tierIcon = '⏳';
+    } else {
+      tierLabel = t('proBannerFree'); tierIcon = '🌱';
+    }
+    banner.innerHTML = `<span class="xvm-pro-icon">${tierIcon}</span> <span class="xvm-pro-tier"></span>`;
+    banner.querySelector('.xvm-pro-tier').textContent = tierLabel;
     container.appendChild(banner);
 
     // Trial-ending nudge (≤ 3 days)
     if (tier === 'trial' && days <= 3) {
       const nudge = document.createElement('div');
       nudge.className = 'xvm-pro-nudge';
-      nudge.textContent = `Your trial ends in ${days} day${days === 1 ? '' : 's'}. Upgrade to keep Pro features.`;
+      nudge.textContent = days === 1 ? t('proNudgeTrialEndOne') : t('proNudgeTrialEnd', days);
       container.appendChild(nudge);
     }
 
@@ -157,10 +192,10 @@
       cta.className = 'xvm-pro-cta';
       const m = document.createElement('a');
       m.className = 'xvm-pro-btn'; m.href = BUY_URL_MONTHLY; m.target = '_blank'; m.rel = 'noopener';
-      m.textContent = 'Monthly · $9';
+      m.textContent = t('proCtaMonthly');
       const a = document.createElement('a');
       a.className = 'xvm-pro-btn xvm-pro-btn-primary'; a.href = BUY_URL_ANNUAL; a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = 'Annual · $90 (save 17%)';
+      a.textContent = t('proCtaAnnual');
       cta.append(m, a);
       container.appendChild(cta);
 
@@ -168,13 +203,16 @@
       const form = document.createElement('div');
       form.className = 'xvm-pro-activate';
       form.innerHTML = `
-        <label class="xvm-pro-act-label">Already bought? Enter your license key:</label>
+        <label class="xvm-pro-act-label"></label>
         <div class="xvm-pro-act-row">
-          <input type="text" id="xvm-pro-key" placeholder="creem-XXXXX..." autocomplete="off" />
-          <button type="button" id="xvm-pro-activate">Activate</button>
+          <input type="text" id="xvm-pro-key" autocomplete="off" />
+          <button type="button" id="xvm-pro-activate"></button>
         </div>
         <div class="xvm-pro-msg" id="xvm-pro-msg"></div>
       `;
+      form.querySelector('.xvm-pro-act-label').textContent = t('proActivateLabel');
+      form.querySelector('#xvm-pro-key').placeholder = t('proActivatePlaceholder');
+      form.querySelector('#xvm-pro-activate').textContent = t('proActivateBtn');
       container.appendChild(form);
 
       form.querySelector('#xvm-pro-activate').addEventListener('click', async () => {
@@ -183,22 +221,23 @@
         const btn = form.querySelector('#xvm-pro-activate');
         const key = keyInput.value.trim();
         if (!KEY_RE.test(key)) {
-          msg.textContent = 'License key format is invalid.';
+          msg.textContent = t('proActErrFormat');
           msg.dataset.kind = 'err';
           return;
         }
-        btn.disabled = true; btn.textContent = 'Activating…';
+        btn.disabled = true; btn.textContent = t('proActivating');
         const res = await activate(key);
-        btn.disabled = false; btn.textContent = 'Activate';
+        btn.disabled = false; btn.textContent = t('proActivateBtn');
         if (res.ok) {
-          msg.textContent = 'License activated. Reload x.com to apply.';
+          msg.textContent = t('proActivatedOk');
           msg.dataset.kind = 'ok';
           refresh();
         } else if (res.error === 'worker_url_unset') {
-          msg.textContent = 'License proxy not configured yet — contact support.';
+          msg.textContent = t('proActErrWorkerUnset');
           msg.dataset.kind = 'err';
         } else {
-          msg.textContent = `Activation failed: ${res.error}${res.message ? ' — ' + res.message : ''}`;
+          const detail = res.error + (res.message ? ' — ' + res.message : '');
+          msg.textContent = t('proActErrGeneric', detail);
           msg.dataset.kind = 'err';
         }
       });
@@ -208,21 +247,24 @@
       const box = document.createElement('div');
       box.className = 'xvm-pro-licbox';
       box.innerHTML = `
-        <div class="xvm-pro-licrow"><span>License</span><code>${maskKey(rec.key)}</code></div>
-        <div class="xvm-pro-licrow"><span>Activated</span><span>${rec.activatedAt ? new Date(rec.activatedAt).toLocaleDateString() : '—'}</span></div>
-        ${rec.expiresAt ? `<div class="xvm-pro-licrow"><span>Renews</span><span>${new Date(rec.expiresAt).toLocaleDateString()}</span></div>` : ''}
+        <div class="xvm-pro-licrow"><span data-k="proLicenseField"></span><code>${maskKey(rec.key)}</code></div>
+        <div class="xvm-pro-licrow"><span data-k="proActivatedField"></span><span>${rec.activatedAt ? new Date(rec.activatedAt).toLocaleDateString() : '—'}</span></div>
+        ${rec.expiresAt ? `<div class="xvm-pro-licrow"><span data-k="proExpiresField"></span><span>${new Date(rec.expiresAt).toLocaleDateString()}</span></div>` : ''}
         <div class="xvm-pro-act-row">
-          <a class="xvm-pro-btn" href="https://www.creem.io/dashboard" target="_blank" rel="noopener">Manage subscription</a>
-          <button type="button" id="xvm-pro-deactivate" class="xvm-pro-btn-ghost">Deactivate</button>
+          <a class="xvm-pro-btn" href="https://www.creem.io/dashboard" target="_blank" rel="noopener"></a>
+          <button type="button" id="xvm-pro-deactivate" class="xvm-pro-btn-ghost"></button>
         </div>
         <div class="xvm-pro-msg" id="xvm-pro-msg"></div>
       `;
       container.appendChild(box);
+      box.querySelectorAll('[data-k]').forEach((el) => { el.textContent = t(el.dataset.k); });
+      box.querySelector('a.xvm-pro-btn').textContent = t('proManageBtn');
+      box.querySelector('#xvm-pro-deactivate').textContent = t('proDeactivateBtn');
       box.querySelector('#xvm-pro-deactivate').addEventListener('click', async () => {
         const msg = box.querySelector('#xvm-pro-msg');
-        msg.textContent = 'Deactivating…';
+        msg.textContent = t('proDeactivating');
         const res = await deactivate();
-        msg.textContent = res.ok ? 'Deactivated.' : 'Deactivation failed.';
+        msg.textContent = res.ok ? t('proDeactivatedOk') : t('proDeactivateErr');
         msg.dataset.kind = res.ok ? 'ok' : 'err';
         refresh();
       });

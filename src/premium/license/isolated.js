@@ -34,6 +34,20 @@
   // in production, the build script failed to substitute.
   const LICENSE_PROXY_URL = '__XVM_LICENSE_WORKER__';
 
+  // Client-side product scoping (#45 follow-up: shared Worker between
+  // x-md-paste and XVM Pro). The Worker now whitelists multiple products
+  // across both extensions; without this check an x-md-paste license
+  // would activate XVM Pro just because the Worker accepted it.
+  // Must mirror popup-pro.js XVM_PRODUCT_IDS exactly (contract test pins).
+  const XVM_PRODUCT_IDS = [
+    'prod_7f7t9EHK3RJlOK37DWr7J', // XVM Pro Monthly
+    'prod_69yTiXGXb04DKm46DNVbN9', // XVM Pro Annual
+  ];
+
+  function isXvmProduct(productId) {
+    return typeof productId === 'string' && XVM_PRODUCT_IDS.includes(productId);
+  }
+
   const TRIAL_DAYS         = 14;
   const TRIAL_MS           = TRIAL_DAYS * 24 * 60 * 60 * 1000;
   // Cache live licenses for 24h before revalidating (ADR-0004).
@@ -140,6 +154,12 @@
     }
     if (!envelope?.ok) return { ok: false, error: 'activation_failed', detail: envelope };
     const data = envelope.data || {};
+    // Client-side product scoping — reject licenses belonging to another
+    // product on the same shared Worker (e.g. an x-md-paste license that
+    // the Worker's whitelist would otherwise accept).
+    if (data.product_id && !isXvmProduct(data.product_id)) {
+      return { ok: false, error: 'wrong_product', detail: { actual: data.product_id } };
+    }
     const inst = data.instance || {};
     const record = {
       key,
@@ -200,6 +220,13 @@
     const stored = await safeStorageGet(STORAGE_KEY, null);
     if (!stored?.key || !stored?.instanceId) {
       return { tier: 'free', record: null, source: 'none' };
+    }
+    // Cached productId scoping check — defends against a stored record
+    // from an older Worker build that didn't enforce productId (or a
+    // tamper-by-user via DevTools storage editor). Pro requires a real
+    // XVM product id; otherwise drop to free immediately.
+    if (stored.productId && !isXvmProduct(stored.productId)) {
+      return { tier: 'free', record: stored, source: 'wrong_product' };
     }
     const sinceCheck = Date.now() - (stored.lastChecked || 0);
     const isStale     = sinceCheck > RECHECK_INTERVAL_MS;
