@@ -160,8 +160,13 @@
       background: rgba(74, 222, 128, 0.12); color: var(--ok);
       border: 1px solid rgba(74, 222, 128, 0.3);
       display: inline-flex; align-items: center; gap: 3px;
+      font-family: inherit; line-height: normal;
     }
     .chip svg { width: 11px; height: 11px; color: inherit; }
+    button.chip {
+      cursor: pointer;
+    }
+    button.chip:hover { filter: brightness(1.1); }
     .chip.soon { background: rgba(100, 116, 139, 0.15); color: var(--muted); border-color: var(--border-hi); }
 
     .configure-link {
@@ -385,17 +390,17 @@
           <li>
             <svg><use href="#icon-palette"/></svg>
             <span class="ft-label" data-i18n="featureColorCardLabel">Custom color palette</span>
-            <span class="chip soon" data-i18n="chipComingSoon">Coming soon</span>
+            <button type="button" class="chip soon" data-configure="color-card" data-i18n="chipComingSoon">Coming soon</button>
           </li>
           <li>
             <svg><use href="#icon-webhook"/></svg>
             <span class="ft-label" data-i18n="featureWebhookLabel">Private hot-tweet webhook</span>
-            <span class="chip soon" data-i18n="chipComingSoon">Coming soon</span>
+            <button type="button" class="chip soon" data-configure="webhook" data-i18n="chipComingSoon">Coming soon</button>
           </li>
           <li>
             <svg><use href="#icon-bell"/></svg>
             <span class="ft-label" data-i18n="featureBarkLabel">Bark notifications</span>
-            <span class="chip soon" data-i18n="chipComingSoon">Coming soon</span>
+            <button type="button" class="chip soon" data-configure="bark" data-i18n="chipComingSoon">Coming soon</button>
           </li>
         </ul>
       </section>

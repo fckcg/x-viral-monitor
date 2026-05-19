@@ -127,6 +127,25 @@ describe('#45 popup-dashboard.js view router', () => {
     expect(/toastM2Hint/.test(dashJs)).toBe(true);
   });
 
+  it('Coming-soon chips are <button data-configure="…"> so click events fire (Codex finding)', () => {
+    // Original bug: stubs were <span class="chip soon"> which never matched
+    // wireConfigureLinks()'s [data-configure] selector → clicking did nothing.
+    // Fix: rendered as <button data-configure="color-card|webhook|bark">.
+    // wireConfigureLinks() routes any data-configure target that isn't
+    // 'rate-filter' through showToast(), so the same selector catches all
+    // three M2 stubs.
+    for (const target of ['color-card', 'webhook', 'bark']) {
+      expect(new RegExp(`<button[^>]*data-configure="${target}"`).test(html),
+        `popup.html must wire the ${target} Coming-soon chip as a <button data-configure="${target}">`
+      ).toBe(true);
+    }
+    // popup-dashboard.js click handler routes non-rate-filter targets to toast.
+    expect(/data-configure.*forEach[\s\S]*else[\s\S]*showToast/.test(dashJs)
+      || /target\s*===\s*['"]rate-filter['"][\s\S]*else[\s\S]*showToast/.test(dashJs),
+      'popup-dashboard.js wireConfigureLinks must showToast() for non-rate-filter targets'
+    ).toBe(true);
+  });
+
   it('back buttons return to dashboard', () => {
     expect(/data-view-back/.test(dashJs)).toBe(true);
     expect(/setView\(\s*['"]dashboard['"]\s*\)/.test(dashJs)).toBe(true);
