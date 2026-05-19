@@ -118,15 +118,20 @@
     `;
     section.querySelectorAll('[data-k]').forEach((el) => { el.textContent = t(el.dataset.k); });
 
-    // Sub-tab switching (Short / Long)
+    // Sub-tab switching (Short / Long).
+    // Codex bb-browser caught aria-selected staying stale after click in the
+    // dataset.* form; switching to getAttribute for the comparison + an
+    // explicit 'true'/'false' literal makes the wiring bulletproof. Same
+    // pattern for the panel data-active flip.
     section.querySelectorAll('[data-sub-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const target = btn.dataset.subTab;
+        const target = btn.getAttribute('data-sub-tab');
         section.querySelectorAll('[data-sub-tab]').forEach((b) => {
-          b.setAttribute('aria-selected', String(b.dataset.subTab === target));
+          const matches = b.getAttribute('data-sub-tab') === target;
+          b.setAttribute('aria-selected', matches ? 'true' : 'false');
         });
         section.querySelectorAll('[data-sub-panel]').forEach((p) => {
-          p.dataset.active = (p.dataset.subPanel === target) ? '1' : '0';
+          p.setAttribute('data-active', p.getAttribute('data-sub-panel') === target ? '1' : '0');
         });
       });
     });
