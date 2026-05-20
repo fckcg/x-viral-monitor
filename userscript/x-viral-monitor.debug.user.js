@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Viral Monitor Minimal Badge DEBUG
 // @namespace    https://github.com/x-viral-monitor
-// @version      0.1.13-debug.2
+// @version      0.1.13-debug.3
 // @description  Debug build for iOS Userscripts: Eruda + XVM hook/GraphQL/DOM/badge diagnostics.
 // @match        https://x.com/*
 // @match        https://pro.x.com/*
@@ -1075,7 +1075,9 @@ article[data-testid="tweet"].xvm-article-linked {
 
   function computeScore(data) {
     const created = new Date(data.createdAt).getTime();
-    const hours = Math.max((Date.now() - created) / 3600000, 0.1);
+    const rawHours = Number.isFinite(created) ? (Date.now() - created) / 3600000 : 0;
+    const minHours = data.source === 'dom-visible-fallback' ? 1 : 0.1;
+    const hours = Math.max(Number.isFinite(data.estimatedAgeHours) ? data.estimatedAgeHours : rawHours, minHours);
     const velocity = data.views / hours;
     const engagements = data.likes + data.retweets + data.replies;
     const engagementRate = data.views > 0 ? engagements / data.views : 0;
@@ -1181,6 +1183,24 @@ article[data-testid="tweet"].xvm-article-linked {
     return blocks[0] || '';
   }
 
+  function getCreatedAtFromArticle(article) {
+    const value = article.querySelector('time[datetime]')?.getAttribute('datetime') || '';
+    const parsed = value ? new Date(value) : null;
+    if (parsed && !Number.isNaN(parsed.getTime())) {
+      return {
+        createdAt: parsed.toUTCString(),
+        estimatedAgeHours: null,
+        estimated: false,
+      };
+    }
+    const fallbackAgeHours = 1;
+    return {
+      createdAt: new Date(Date.now() - fallbackAgeHours * 3600000).toUTCString(),
+      estimatedAgeHours: fallbackAgeHours,
+      estimated: true,
+    };
+  }
+
   function extractVisibleTweetData(article, id) {
     const replies = firstMetric(article, ['[data-testid="reply"]'], /reply|repl|回复|回覆|返信/i);
     const retweets = firstMetric(article, ['[data-testid="retweet"]', '[data-testid="unretweet"]'], /repost|retweet|转发|轉發|リポスト/i);
@@ -1199,6 +1219,7 @@ article[data-testid="tweet"].xvm-article-linked {
     if (!views && engagementFloor) views = Math.max(engagementFloor * 20, engagementFloor + 1);
     if (!views) return null;
     const { displayName, handle } = getAuthorInfo(article);
+    const domTime = getCreatedAtFromArticle(article);
     return {
       id,
       views,
@@ -1206,7 +1227,9 @@ article[data-testid="tweet"].xvm-article-linked {
       retweets,
       replies,
       bookmarks,
-      createdAt: new Date().toUTCString(),
+      createdAt: domTime.createdAt,
+      estimatedAgeHours: domTime.estimatedAgeHours,
+      estimatedCreatedAt: domTime.estimated,
       text: getTweetTextFromArticle(article),
       authorName: displayName || '',
       authorScreenName: handle.replace(/^@/, ''),
@@ -1967,7 +1990,15 @@ article[data-testid="tweet"].xvm-article-linked {
         if (data) {
           tweetDataStore.set(tweetId, data);
           debugState.domFallbackTweets += 1;
-          debugLog('DOM visible metrics fallback extracted', { tweetId, views: data.views, likes: data.likes, retweets: data.retweets, replies: data.replies });
+          debugLog('DOM visible metrics fallback extracted', {
+            tweetId,
+            views: data.views,
+            likes: data.likes,
+            retweets: data.retweets,
+            replies: data.replies,
+            estimatedAgeHours: data.estimatedAgeHours || '',
+            estimatedCreatedAt: !!data.estimatedCreatedAt,
+          });
         } else {
           debugState.lastBadgeReason = 'skip:no-captured-data';
           continue;
