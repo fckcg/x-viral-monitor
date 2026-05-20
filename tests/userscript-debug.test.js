@@ -11,7 +11,7 @@ const releaseScript = readFileSync(resolve(repo, 'userscript/x-viral-monitor.use
 describe('iOS userscript debug build', () => {
   it('is a separate DEBUG userscript and does not replace the release script', () => {
     expect(debugScript).toContain('@name         X Viral Monitor Minimal Badge DEBUG');
-    expect(debugScript).toContain('@version      0.1.13-debug.4');
+    expect(debugScript).toContain('@version      0.1.13-debug.5');
     expect(debugScript).toContain('Debug build for iOS Userscripts');
     expect(releaseScript).toContain('@name         X Viral Monitor Minimal Badge');
     expect(releaseScript).not.toContain('@name         X Viral Monitor Minimal Badge DEBUG');
@@ -81,6 +81,10 @@ describe('iOS userscript debug build', () => {
     expect(debugScript).toContain('performance.getEntriesByType');
     expect(debugScript).toContain('function refetchGraphqlUrl(url, source = \'resource-refetch\')');
     expect(debugScript).toContain('credentials: \'include\'');
+    expect(debugScript).toContain('function getCookieValue(name)');
+    expect(debugScript).toContain('headers[\'x-csrf-token\'] = csrf');
+    expect(debugScript).toContain('x-twitter-active-user');
+    expect(debugScript).toContain('x-twitter-auth-type');
     expect(debugScript).toContain('function buildDebugBundle()');
     expect(debugScript).toContain('function recordGraphqlDebug(entry)');
     expect(debugScript).toContain('XVM_TM_GRAPHQL_REQUEST');
@@ -90,5 +94,12 @@ describe('iOS userscript debug build', () => {
     expect(debugScript).toContain('time[datetime]');
     expect(debugScript).not.toContain('createdAt: new Date().toUTCString()');
     expect(debugScript).toContain('source: \'dom-visible-fallback\'');
+  });
+
+  it('disables the mobile debug leaderboard while keeping badges and debug launcher', () => {
+    expect(debugScript).toContain('const ENABLE_DEBUG_LEADERBOARD = false');
+    expect(debugScript).toContain('if (!ENABLE_DEBUG_LEADERBOARD || !settings.leaderboardEnabled)');
+    expect(debugScript).toContain('leaderboardEnabled: false');
+    expect(debugScript).toContain('xvm-debug-launcher');
   });
 });

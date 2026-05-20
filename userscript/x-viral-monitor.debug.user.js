@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Viral Monitor Minimal Badge DEBUG
 // @namespace    https://github.com/x-viral-monitor
-// @version      0.1.13-debug.4
+// @version      0.1.13-debug.5
 // @description  Debug build for iOS Userscripts: Eruda + XVM hook/GraphQL/DOM/badge diagnostics.
 // @match        https://x.com/*
 // @match        https://pro.x.com/*
@@ -24,6 +24,7 @@
     { id: 'views', visible: true },
     { id: 'velocity', visible: true },
   ];
+  const ENABLE_DEBUG_LEADERBOARD = false;
   const I18N = {
     en: {
       colRank: 'Rank',
@@ -253,6 +254,12 @@
     return `${text.slice(0, max)}\n/* XVM_DEBUG_TRUNCATED ${text.length - max} chars */`;
   }
 
+  function getCookieValue(name) {
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : '';
+  }
+
   function recordGraphqlDebug(entry) {
     if (!entry?.url || !GRAPHQL_RE.test(entry.url)) return null;
     const parsed = parseGraphqlUrl(entry.url);
@@ -282,10 +289,17 @@
     if (existing) return;
     debugState.refetchAttempts += 1;
     try {
+      const csrf = getCookieValue('ct0');
+      const headers = {
+        accept: 'application/json',
+        'x-twitter-active-user': 'yes',
+        'x-twitter-auth-type': 'OAuth2Session',
+      };
+      if (csrf) headers['x-csrf-token'] = csrf;
       const response = await fetch(url, {
         credentials: 'include',
         cache: 'no-store',
-        headers: { accept: 'application/json' },
+        headers,
       });
       const text = await response.text();
       debugState.refetchSuccesses += response.ok ? 1 : 0;
@@ -479,7 +493,7 @@
       return {
         trending: Number.isFinite(trending) && trending > 0 ? trending : 1000,
         viral: Number.isFinite(viral) && viral > 0 ? viral : 10000,
-        leaderboardEnabled: parsed.leaderboardEnabled !== false,
+        leaderboardEnabled: ENABLE_DEBUG_LEADERBOARD && parsed.leaderboardEnabled === true,
         leaderboardCount: Number.isFinite(leaderboardCount) ? Math.max(1, Math.min(50, leaderboardCount)) : 10,
         leaderboardWidth: Number.isFinite(leaderboardWidth) ? Math.max(240, Math.min(640, leaderboardWidth)) : 280,
         leaderboardHeight: Number.isFinite(leaderboardHeight) ? Math.max(120, Math.min(800, leaderboardHeight)) : 300,
@@ -488,7 +502,7 @@
         badgeStyle: parsed.badgeStyle === 'inline-classic' ? 'inline-classic' : 'pill-solid',
       };
     } catch (_) {
-      return { trending: 1000, viral: 10000, leaderboardEnabled: true, leaderboardCount: 10, leaderboardWidth: 280, leaderboardHeight: 300, leaderboardPos: null, leaderboardColumns: normalizeColumns(null), badgeStyle: 'pill-solid' };
+      return { trending: 1000, viral: 10000, leaderboardEnabled: false, leaderboardCount: 10, leaderboardWidth: 280, leaderboardHeight: 300, leaderboardPos: null, leaderboardColumns: normalizeColumns(null), badgeStyle: 'pill-solid' };
     }
   }
 
@@ -2100,7 +2114,7 @@ article[data-testid="tweet"].xvm-article-linked {
 
   function renderLeaderboard() {
     if (!document.body) return;
-    if (!settings.leaderboardEnabled) {
+    if (!ENABLE_DEBUG_LEADERBOARD || !settings.leaderboardEnabled) {
       hideLeaderboard();
       return;
     }
@@ -2247,7 +2261,7 @@ article[data-testid="tweet"].xvm-article-linked {
     scheduleRender.raf = requestAnimationFrame(() => {
       scheduleRender.raf = 0;
       renderBadges();
-      if (settings.leaderboardEnabled) renderLeaderboard();
+      if (ENABLE_DEBUG_LEADERBOARD && settings.leaderboardEnabled) renderLeaderboard();
       else hideLeaderboard();
     });
   }
@@ -2258,7 +2272,7 @@ article[data-testid="tweet"].xvm-article-linked {
     lbScrollTick = true;
     setTimeout(() => {
       lbScrollTick = false;
-      if (settings.leaderboardEnabled) renderLeaderboard();
+      if (ENABLE_DEBUG_LEADERBOARD && settings.leaderboardEnabled) renderLeaderboard();
     }, 250);
   }, { passive: true });
   window.addEventListener('resize', () => {
@@ -2347,6 +2361,7 @@ article[data-testid="tweet"].xvm-article-linked {
   }
 
   function openSettingsPanel() {
+    if (!ENABLE_DEBUG_LEADERBOARD) return;
     settings.leaderboardEnabled = true;
     saveSettings();
     const el = ensureLeaderboard();
@@ -2357,7 +2372,7 @@ article[data-testid="tweet"].xvm-article-linked {
     scheduleRender();
   }
 
-  if (typeof GM_registerMenuCommand === 'function') {
+  if (ENABLE_DEBUG_LEADERBOARD && typeof GM_registerMenuCommand === 'function') {
     GM_registerMenuCommand(t('contentLeaderboardSettings') || 'Settings', openSettingsPanel);
   }
 
