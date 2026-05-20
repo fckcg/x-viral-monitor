@@ -13,7 +13,7 @@ const userscriptReadme = readFileSync(resolve(repo, 'userscript/README.md'), 'ut
 describe('iOS mobile userscript build', () => {
   it('ships as a separate mobile file without replacing the desktop userscript', () => {
     expect(mobileScript).toContain('@name         X Viral Monitor Mobile Badge');
-    expect(mobileScript).toContain('@version      0.1.14');
+    expect(mobileScript).toContain('@version      0.1.15');
     expect(mobileScript).toContain('@match        https://mobile.x.com/*');
     expect(desktopScript).toContain('@name         X Viral Monitor Minimal Badge');
     expect(desktopScript).toContain('@version      0.1.13');
@@ -22,7 +22,7 @@ describe('iOS mobile userscript build', () => {
 
   it('keeps the debug build separate from the mobile release path', () => {
     expect(debugScript).toContain('@name         X Viral Monitor Minimal Badge DEBUG');
-    expect(debugScript).toContain('@version      0.1.13-debug.5');
+    expect(debugScript).toContain('@version      0.1.13-debug.6');
     expect(mobileScript).not.toContain('@name         X Viral Monitor Minimal Badge DEBUG');
     expect(mobileScript).not.toContain('@version      0.1.13-debug.5');
   });
@@ -33,6 +33,12 @@ describe('iOS mobile userscript build', () => {
     expect(mobileScript).toContain('if (!ENABLE_DEBUG_LEADERBOARD || !settings.leaderboardEnabled)');
     expect(mobileScript).toContain('function extractVisibleTweetData(article, id)');
     expect(mobileScript).toContain('source: \'dom-visible-fallback\'');
+  });
+
+  it('uses real tweet datetime for sub-hour velocity and only estimates when datetime is missing', () => {
+    expect(mobileScript).toContain('const minHours = data.estimatedCreatedAt ? 1 : 5 / 60');
+    expect(mobileScript).toContain('estimatedCreatedAt: domTime.estimated');
+    expect(mobileScript).toContain('const fallbackAgeHours = 1');
   });
 
   it('gates diagnostics behind the xvm-debug query flag', () => {

@@ -11,7 +11,7 @@ const releaseScript = readFileSync(resolve(repo, 'userscript/x-viral-monitor.use
 describe('iOS userscript debug build', () => {
   it('is a separate DEBUG userscript and does not replace the release script', () => {
     expect(debugScript).toContain('@name         X Viral Monitor Minimal Badge DEBUG');
-    expect(debugScript).toContain('@version      0.1.13-debug.5');
+    expect(debugScript).toContain('@version      0.1.13-debug.6');
     expect(debugScript).toContain('Debug build for iOS Userscripts');
     expect(releaseScript).toContain('@name         X Viral Monitor Minimal Badge');
     expect(releaseScript).not.toContain('@name         X Viral Monitor Minimal Badge DEBUG');
@@ -90,7 +90,7 @@ describe('iOS userscript debug build', () => {
     expect(debugScript).toContain('XVM_TM_GRAPHQL_REQUEST');
     expect(debugScript).toContain('function extractVisibleTweetData(article, id)');
     expect(debugScript).toContain('function getCreatedAtFromArticle(article)');
-    expect(debugScript).toContain('const minHours = data.source === \'dom-visible-fallback\' ? 1 : 0.1');
+    expect(debugScript).toContain('const minHours = data.estimatedCreatedAt ? 1 : 5 / 60');
     expect(debugScript).toContain('time[datetime]');
     expect(debugScript).not.toContain('createdAt: new Date().toUTCString()');
     expect(debugScript).toContain('source: \'dom-visible-fallback\'');

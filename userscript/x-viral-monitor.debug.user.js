@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X Viral Monitor Minimal Badge DEBUG
 // @namespace    https://github.com/x-viral-monitor
-// @version      0.1.13-debug.5
+// @version      0.1.13-debug.6
 // @description  Debug build for iOS Userscripts: Eruda + XVM hook/GraphQL/DOM/badge diagnostics.
 // @match        https://x.com/*
 // @match        https://pro.x.com/*
@@ -1269,7 +1269,7 @@ article[data-testid="tweet"].xvm-article-linked {
   function computeScore(data) {
     const created = new Date(data.createdAt).getTime();
     const rawHours = Number.isFinite(created) ? (Date.now() - created) / 3600000 : 0;
-    const minHours = data.source === 'dom-visible-fallback' ? 1 : 0.1;
+    const minHours = data.estimatedCreatedAt ? 1 : 5 / 60;
     const hours = Math.max(Number.isFinite(data.estimatedAgeHours) ? data.estimatedAgeHours : rawHours, minHours);
     const velocity = data.views / hours;
     const engagements = data.likes + data.retweets + data.replies;
