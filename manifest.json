@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "permissions": ["storage"],
@@ -17,7 +17,7 @@
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://pro.x.com/*"],
-      "js": ["bridge.js", "src/premium/license/tier-logic.js", "src/premium/license/isolated.js"],
+      "js": ["bridge.js", "src/premium/license/tier-logic.js", "src/premium/license/entitlement.js", "src/premium/license/isolated.js"],
       "run_at": "document_start"
     },
     {

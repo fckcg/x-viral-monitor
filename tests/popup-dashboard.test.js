@@ -110,6 +110,7 @@ describe('#45 popup tabs structure (mock A)', () => {
     const scripts = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
     expect(scripts).toEqual([
       'src/premium/license/tier-logic.js',
+      'src/premium/license/entitlement.js',
       'src/premium/license/popup-pro.js',
       'src/premium/rate-filter/popup-rate-filter.js',
       'src/premium/list-member-filter/member-source.js',

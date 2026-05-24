@@ -121,15 +121,33 @@ describe('#45 step 2 — ADR-0004 storage / secret / productId checklist', () =>
     const iso = cs.find((s) => s.js?.includes('src/premium/license/isolated.js'));
     expect(iso, 'isolated.js must appear in a content_scripts entry').toBeTruthy();
     expect(iso.world, 'isolated.js content_scripts entry must NOT set world:MAIN').not.toBe('MAIN');
+    expect(iso.js, 'entitlement.js must load before isolated.js').toContain('src/premium/license/entitlement.js');
+  });
+
+  it('client verifies Worker-signed entitlement before storing Pro state', () => {
+    const entitlement = readFileSync(resolve(repo, 'src/premium/license/entitlement.js'), 'utf8');
+    const popup = readFileSync(resolve(repo, 'src/premium/license/popup-pro.js'), 'utf8');
+    expect(entitlement).toMatch(/crypto\.subtle\.verify/);
+    expect(entitlement).toMatch(/ENTITLEMENT_VERIFY_PUBLIC_JWK/);
+    expect(entitlement).not.toMatch(/PRIVATE|HMAC_SECRET|SIGNING_PRIVATE/);
+    expect(isolated).toMatch(/verifyEntitlementEnvelope/);
+    expect(popup).toMatch(/verifyEntitlementEnvelope/);
   });
 
   it('Worker uses productId whitelist (CREEM_PRODUCT_IDS) — A decision', () => {
     expect(/CREEM_PRODUCT_IDS/.test(worker),
       'worker must support CREEM_PRODUCT_IDS whitelist (decision A)'
     ).toBe(true);
-    expect(/parseProductIds/.test(worker),
-      'worker must have parseProductIds() helper'
+    expect(/getAllowedProductIds/.test(worker),
+      'worker must have getAllowedProductIds() helper'
     ).toBe(true);
+  });
+
+  it('Worker signs short-lived entitlement envelopes with server-side private key', () => {
+    expect(worker).toMatch(/ENTITLEMENT_SIGNING_PRIVATE_JWK/);
+    expect(worker).toMatch(/entitlement_payload/);
+    expect(worker).toMatch(/entitlement_sig/);
+    expect(worker).toMatch(/ENTITLEMENT_TTL_SECONDS/);
   });
 
   it('Worker still injects x-api-key server-side', () => {

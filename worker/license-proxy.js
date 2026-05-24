@@ -1,49 +1,47 @@
-// Cloudflare Worker — license proxy for XVM Pro.
+// Cloudflare Worker — minimal proxy that forwards license activate/validate/
+// deactivate requests to Creem with the secret x-api-key header injected
+// server-side. The extension calls THIS worker, never Creem directly, so
+// the API key never ships in the extension bundle.
 //
-// Forwards license activate/validate/deactivate requests to Creem with the
-// secret x-api-key header injected server-side. The extension calls THIS
-// worker, never Creem directly, so the API key never ships in the extension
-// bundle.
-//
-// Forked from x-article-md-paste/worker/license-proxy.js with one M1-driven
-// change: CREEM_PRODUCT_ID singular → CREEM_PRODUCT_IDS comma-separated
-// whitelist, so the same Worker validates licenses for BOTH XVM Pro
-// products (Monthly + Annual) without needing two deployments.
+// Forked for XVM. Keep this Worker independent from XMP so product
+// whitelists, origins, and signing keys can diverge safely.
 //
 // ─── Deployment ──────────────────────────────────────────────────────
-//   See worker/DEPLOY.md for the full 5-minute walkthrough.
-//
-//   TL;DR env vars (Cloudflare dashboard → Worker → Settings → Variables):
-//     CREEM_API_KEY      = "creem_live_xxxxx..."   (Type: Secret, Encrypt: on)
-//     CREEM_PRODUCT_IDS  = "prod_xxx,prod_yyy"     (comma-sep whitelist)
-//     ALLOWED_ORIGIN     = "chrome-extension://YOUR_EXT_ID"  ("*" while testing)
+//   1. Sign in to https://dash.cloudflare.com → Workers & Pages → Create
+//   2. Choose "Hello World" template, paste this entire file as the worker
+//   3. Settings → Variables → add:
+//        CREEM_API_KEY     = "creem_live_xxxxx..."   (Encrypt = on)
+//        CREEM_PRODUCT_IDS = "prod_month,prod_year" (comma-separated, required)
+//        ENTITLEMENT_SIGNING_PRIVATE_JWK = '{"kty":"EC",...}' (Secret)
+//        ALLOWED_ORIGIN    = "chrome-extension://jfopmepbbdmhidjafcebokfmdkphfmpl"
+//                            (required in production; do not use "*")
+//   4. Deploy. Worker URL will be like:
+//        https://xvm-license.YOUR-SUBDOMAIN.workers.dev
+//   5. Paste that URL into src/premium/license/{isolated,popup-pro}.js
+//      → LICENSE_PROXY_URL
 //
 // ─── API ─────────────────────────────────────────────────────────────
 //   POST /activate    { key, instance_name }
 //   POST /validate    { key, instance_id }
 //   POST /deactivate  { key, instance_id }
+//   Referral endpoints are retired. Old clients receive 410 Gone JSON.
 //
 //   Response: { ok, status, data }   — same shape regardless of action
-//
-// ─── Backward-compat ─────────────────────────────────────────────────
-// Single-product CREEM_PRODUCT_ID is also honoured (same semantics as the
-// x-md-paste Worker) so the deploy flow stays familiar. Whitelist mode
-// engages whenever CREEM_PRODUCT_IDS is set.
 
+// Creem uses separate hosts for test vs live mode. Auto-route based on
+// the API key prefix so you don't have to maintain two Worker deployments.
 const CREEM_LIVE = 'https://api.creem.io/v1/licenses';
 const CREEM_TEST = 'https://test-api.creem.io/v1/licenses';
 const ALLOWED_ACTIONS = new Set(['activate', 'validate', 'deactivate']);
+const REMOVED_REFERRAL_ACTIONS = new Set(['referral/code', 'referral/claim', 'referral/stats']);
+const ENTITLEMENT_TTL_SECONDS = 10 * 60;
+const DEFAULT_XVM_PRODUCT_IDS = [
+  'prod_7f7t9EHK3RJlOK37DWr7J',
+  'prod_69yTiXGXb04DKm46DNVbN9',
+];
 
 function creemBase(apiKey) {
   return (apiKey || '').startsWith('creem_test_') ? CREEM_TEST : CREEM_LIVE;
-}
-
-function parseProductIds(env) {
-  if (env.CREEM_PRODUCT_IDS) {
-    return env.CREEM_PRODUCT_IDS.split(',').map((s) => s.trim()).filter(Boolean);
-  }
-  if (env.CREEM_PRODUCT_ID) return [env.CREEM_PRODUCT_ID.trim()];
-  return [];
 }
 
 export default {
@@ -51,15 +49,24 @@ export default {
     const origin = request.headers.get('Origin') || '';
     const corsHeaders = buildCors(env, origin);
 
+    const url = new URL(request.url);
+    const action = url.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
+    if (REMOVED_REFERRAL_ACTIONS.has(action)) {
+      return json({
+        ok: false,
+        code: 'feature_removed',
+        error: 'feature_removed',
+        message: 'Referral rewards have been retired.',
+      }, 410, corsHeaders);
+    }
+
     if (request.method !== 'POST') {
       return json({ ok: false, error: 'method_not_allowed' }, 405, corsHeaders);
     }
 
-    const url = new URL(request.url);
-    const action = url.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
     if (!ALLOWED_ACTIONS.has(action)) {
       return json({ ok: false, error: 'unknown_action', action }, 404, corsHeaders);
     }
@@ -105,36 +112,149 @@ export default {
       data = null;
     }
 
-    // Product gating: if a productId whitelist is configured, reject licenses
-    // that belong to other products. Defends against using a key for another
-    // Creem product on the same account.
-    const allowedProducts = parseProductIds(env);
-    if (allowedProducts.length && upstream.ok && data?.product_id
-        && !allowedProducts.includes(data.product_id)) {
+    const productCheck = checkProductId(data?.product_id, env);
+    if (upstream.ok && action !== 'deactivate' && !productCheck.ok) {
       return json({
         ok: false,
         status: 403,
-        error: 'wrong_product',
-        detail: { expected: allowedProducts, actual: data.product_id },
+        error: productCheck.error,
+        detail: { expected: productCheck.expected, actual: data?.product_id || null },
       }, 200, corsHeaders);
     }
 
-    return json({ ok: upstream.ok, status: upstream.status, data }, 200, corsHeaders);
+    const payload = { ok: upstream.ok, status: upstream.status, data };
+    if (upstream.ok && (action === 'activate' || action === 'validate')) {
+      const instanceId = action === 'activate'
+        ? data?.instance?.id
+        : safe.instance_id;
+      let entitlement;
+      try {
+        entitlement = await makeSignedEntitlement({
+          licenseKey: safe.key,
+          instanceId,
+          status: data?.status || 'active',
+          productId: data?.product_id,
+          activationLimit: data?.activation_limit ?? null,
+          activationUsage: data?.activation ?? null,
+          expiresAt: data?.expires_at || null,
+        }, env);
+      } catch (e) {
+        return json({ ok: false, status: 500, error: 'entitlement_signing_config_missing', detail: String(e?.message || e) }, 200, corsHeaders);
+      }
+      payload.entitlement = entitlement.entitlement;
+      payload.entitlement_payload = entitlement.payload;
+      payload.entitlement_sig = entitlement.signature;
+    }
+
+    return json(payload, 200, corsHeaders);
   },
 };
+
+export class ReferralLedger {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request) {
+    return new Response(JSON.stringify({ ok: false, code: 'feature_removed', error: 'feature_removed' }), {
+      status: 410,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+function checkProductId(productId, env) {
+  const allowed = getAllowedProductIds(env);
+  if (!allowed.length) {
+    return { ok: false, error: 'server_product_config_missing', expected: [] };
+  }
+  if (!productId) {
+    return { ok: false, error: 'missing_product_id', expected: allowed };
+  }
+  if (!allowed.includes(productId)) {
+    return { ok: false, error: 'wrong_product', expected: allowed };
+  }
+  return { ok: true, expected: allowed };
+}
+
+function getAllowedProductIds(env = {}) {
+  const configured = typeof env.CREEM_PRODUCT_IDS === 'string'
+    ? env.CREEM_PRODUCT_IDS.split(',').map((id) => id.trim()).filter(Boolean)
+    : [];
+  if (configured.length) return configured;
+  if (typeof env.CREEM_PRODUCT_ID === 'string' && env.CREEM_PRODUCT_ID.trim()) {
+    return [env.CREEM_PRODUCT_ID.trim()];
+  }
+  return DEFAULT_XVM_PRODUCT_IDS;
+}
+
+async function makeSignedEntitlement(input, env) {
+  const now = Math.floor(Date.now() / 1000);
+  const entitlement = {
+    v: 1,
+    product_id: input.productId,
+    license_key_hash: await sha256(input.licenseKey),
+    instance_id: input.instanceId || '',
+    status: input.status || 'active',
+    activation_limit: input.activationLimit,
+    activation_usage: input.activationUsage,
+    expires_at: input.expiresAt,
+    iat: now,
+    exp: now + ENTITLEMENT_TTL_SECONDS,
+  };
+  const payload = base64UrlEncode(JSON.stringify(entitlement));
+  const signature = await ecdsaSign(payload, env.ENTITLEMENT_SIGNING_PRIVATE_JWK);
+  return { entitlement, payload, signature };
+}
+
+async function ecdsaSign(payload, privateJwkJson) {
+  if (!privateJwkJson) throw new Error('missing ENTITLEMENT_SIGNING_PRIVATE_JWK');
+  let jwk;
+  try {
+    jwk = typeof privateJwkJson === 'string' ? JSON.parse(privateJwkJson) : privateJwkJson;
+  } catch {
+    throw new Error('invalid ENTITLEMENT_SIGNING_PRIVATE_JWK');
+  }
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(payload));
+  return base64UrlBytes(new Uint8Array(sig));
+}
+
+function base64UrlEncode(value) {
+  return base64UrlBytes(new TextEncoder().encode(value));
+}
+
+function base64UrlBytes(bytes) {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sha256(value) {
+  const bytes = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 function buildCors(env, requestOrigin) {
   // ALLOWED_ORIGIN can be:
   //   "*"                                    → wide-open (testing only)
   //   "chrome-extension://abc..."            → single ext
   //   "chrome-extension://abc,chrome-..."    → comma-separated whitelist
-  const allowed = (env.ALLOWED_ORIGIN || '*').split(',').map((s) => s.trim());
+  const allowed = String(env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
   const allow = allowed.includes('*')
     ? '*'
-    : (allowed.includes(requestOrigin) ? requestOrigin : allowed[0] || '*');
+    : (allowed.includes(requestOrigin) ? requestOrigin : allowed[0] || 'null');
   return {
     'Access-Control-Allow-Origin': allow,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
@@ -147,3 +267,11 @@ function json(payload, status, headers) {
     headers: { 'Content-Type': 'application/json', ...headers },
   });
 }
+
+export const __test = {
+  buildCors,
+  checkProductId,
+  creemBase,
+  getAllowedProductIds,
+  makeSignedEntitlement,
+};

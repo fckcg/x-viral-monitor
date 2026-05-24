@@ -58,8 +58,11 @@
     //   (a) record from before scoping landed
     //   (b) DevTools storage tamper
     //   (c) shared Worker accepting a sibling product (e.g. x-md-paste)
-    if (stored.productId && !isXvmProduct(stored.productId)) {
-      return { tier: 'free', record: stored, source: 'wrong_product' };
+    if (!isXvmProduct(stored.productId)) {
+      return { tier: 'free', record: stored, source: stored.productId ? 'wrong_product' : 'missing_product' };
+    }
+    if (!Number.isFinite(stored.entitlementExpiresAt) || stored.entitlementExpiresAt <= t) {
+      return { tier: 'free', record: stored, source: 'invalid_entitlement' };
     }
     if (stored.status && stored.status !== 'active') {
       return { tier: 'free', record: stored, source: 'expired' };

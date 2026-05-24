@@ -8,26 +8,30 @@
 // tier rules must be made in BOTH places, which the license-slice tests
 // will catch via duplicated invariant assertions).
 //
-// Buy URLs (Creem checkout). Product IDs are still the pre-price-change IDs
-// until the $2.9/mo and $29/yr Creem products are created and wired.
-//   Monthly $2.9 display — prod_7f7t9EHK3RJlOK37DWr7J (TODO: replace product id)
-//   Annual  $29 display  — prod_69yTiXGXb04DKm46DNVbN9 (TODO: replace product id)
+// Buy URLs (Creem checkout).
+//   Monthly $2.9 display — prod_7f7t9EHK3RJlOK37DWr7J
+//   Annual  $29 display  — prod_69yTiXGXb04DKm46DNVbN9
 
 (() => {
-  const LICENSE_PROXY_URL = 'https://xmp-license.lengkuxiaomao.workers.dev';
+  const LICENSE_PROXY_URL = 'https://xvm-license.lengkuxiaomao.workers.dev';
   const BUY_URL_MONTHLY = 'https://www.creem.io/payment/prod_7f7t9EHK3RJlOK37DWr7J';
   const BUY_URL_ANNUAL  = 'https://www.creem.io/payment/prod_69yTiXGXb04DKm46DNVbN9';
-  console.warn('[xvm pro] Checkout URLs still use old Creem product IDs; replace when $2.9/mo and $29/yr products are available.');
 
   // All tier-resolution logic lives in tier-logic.js (loaded BEFORE us via
   // <script> in popup.html). Single source of truth; eliminates mirror
   // drift between this file and isolated.js.
   const TL = globalThis.__xvmTierLogic;
+  const ENT = globalThis.__xvmEntitlement;
   if (!TL) {
     console.error('[xvm pro] tier-logic.js not loaded before popup-pro.js — popup.html script order broken');
     return;
   }
+  if (!ENT) {
+    console.error('[xvm pro] entitlement.js not loaded before popup-pro.js — popup.html script order broken');
+    return;
+  }
   const { isXvmProduct, licenseStatusFrom, resolveTierFrom } = TL;
+  const { verifyEntitlementEnvelope } = ENT;
 
   const STORAGE_KEY = 'xvm_license_v1';
   const TRIAL_KEY = 'xvm_trial_v1';
@@ -101,8 +105,16 @@
     }
     if (!envelope?.ok) return { ok: false, error: 'activation_failed', detail: envelope };
     const data = envelope.data || {};
-    if (data.product_id && !isXvmProduct(data.product_id)) {
+    if (!isXvmProduct(data.product_id)) {
       return { ok: false, error: 'wrong_product', detail: { actual: data.product_id } };
+    }
+    const entitlement = await verifyEntitlementEnvelope(envelope, {
+      productId: data.product_id,
+      instanceId: data.instance?.id || '',
+      key,
+    }, isXvmProduct);
+    if (!entitlement.ok) {
+      return { ok: false, error: entitlement.error, detail: entitlement.detail || null };
     }
     const inst = data.instance || {};
     const record = {
@@ -113,6 +125,9 @@
       activationUsage: data.activation ?? null,
       expiresAt: data.expires_at ? new Date(data.expires_at).getTime() : null,
       productId: data.product_id || null,
+      entitlementPayload: envelope.entitlement_payload || '',
+      entitlementSig: envelope.entitlement_sig || '',
+      entitlementExpiresAt: entitlement.entitlement.exp * 1000,
     };
     await storageSet({ [STORAGE_KEY]: record });
     return { ok: true, record };

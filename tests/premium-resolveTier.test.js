@@ -43,6 +43,7 @@ function freshLicense(overrides = {}) {
     productId: XVM_PROD,
     status: 'active',
     lastChecked: NOW, // fresh by default
+    entitlementExpiresAt: NOW + 10 * 60 * 1000,
     activatedAt: NOW - 86400000,
     ...overrides,
   };
@@ -162,6 +163,20 @@ describe('#45 ADR-0004 scenario 7 — wrong product (shared-Worker spillover)', 
     const r = resolveTierFrom(lic, null, NOW);
     // popup diagnostics: source must be 'wrong_product', not 'none'.
     expect(r.source).toBe('wrong_product');
+  });
+
+  it('missing productId fails closed', () => {
+    const lic = freshLicense({ productId: null });
+    const r = resolveTierFrom(lic, null, NOW);
+    expect(r.tier).toBe('free');
+    expect(r.source).toBe('missing_product');
+  });
+});
+
+describe('#114 signed entitlement cache guard', () => {
+  it('missing or expired entitlement downgrades even for matching product', () => {
+    expect(resolveTierFrom(freshLicense({ entitlementExpiresAt: null }), null, NOW).tier).toBe('free');
+    expect(resolveTierFrom(freshLicense({ entitlementExpiresAt: NOW - 1 }), null, NOW).source).toBe('invalid_entitlement');
   });
 });
 

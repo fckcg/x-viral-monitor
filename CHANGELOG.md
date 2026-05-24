@@ -5,6 +5,22 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ---
 
+## [1.7.1] - 2026-05-24
+
+### Fixed
+
+- Switched XVM Pro license activation from the shared XMP Worker to an independent `xvm-license` Worker, fixing Chrome extension CORS failures during activation.
+- Added Worker-signed ECDSA entitlement envelopes and client-side verification before storing or refreshing Pro license state.
+- Made XVM product scoping fail closed: missing or non-XVM `product_id` now rejects the license and downgrades to Free.
+- Pinned the license proxy URL to `https://xvm-license.lengkuxiaomao.workers.dev`.
+
+### Internal
+
+- Added independent Worker deployment config, XVM-only product whitelist, and local ignored secret helper files.
+- Kept the existing $2.9/month and $29/year Creem checkout product IDs while the new pricing products are pending.
+
+---
+
 ## [1.7.0] - 2026-05-20
 
 ### Added

@@ -32,17 +32,23 @@
   // ─── Configuration ──────────────────────────────────────────────────
   // Placeholder replaced at build time. If you see __XVM_LICENSE_WORKER__
   // in production, the build script failed to substitute.
-  const LICENSE_PROXY_URL = 'https://xmp-license.lengkuxiaomao.workers.dev';
+  const LICENSE_PROXY_URL = 'https://xvm-license.lengkuxiaomao.workers.dev';
 
   // All tier-resolution logic lives in tier-logic.js (loaded BEFORE us per
   // manifest content_scripts order). Pulling from globalThis keeps both
   // contexts (isolated + popup) on a single source of truth.
   const TL = globalThis.__xvmTierLogic;
+  const ENT = globalThis.__xvmEntitlement;
   if (!TL) {
     console.error('[xvm pro] tier-logic.js not loaded before isolated.js — manifest content_scripts order broken');
     return;
   }
+  if (!ENT) {
+    console.error('[xvm pro] entitlement.js not loaded before isolated.js — manifest content_scripts order broken');
+    return;
+  }
   const { isXvmProduct, trialStatus, licenseStatusFrom, resolveTierFrom } = TL;
+  const { verifyEntitlementEnvelope } = ENT;
 
   const STORAGE_KEY    = 'xvm_license_v1';
   const TRIAL_KEY      = 'xvm_trial_v1';
@@ -138,8 +144,16 @@
     // Client-side product scoping — reject licenses belonging to another
     // product on the same shared Worker (e.g. an x-md-paste license that
     // the Worker's whitelist would otherwise accept).
-    if (data.product_id && !isXvmProduct(data.product_id)) {
+    if (!isXvmProduct(data.product_id)) {
       return { ok: false, error: 'wrong_product', detail: { actual: data.product_id } };
+    }
+    const entitlement = await verifyEntitlementEnvelope(envelope, {
+      productId: data.product_id,
+      instanceId: data.instance?.id || '',
+      key,
+    }, isXvmProduct);
+    if (!entitlement.ok) {
+      return { ok: false, error: entitlement.error, detail: entitlement.detail || null };
     }
     const inst = data.instance || {};
     const record = {
@@ -155,6 +169,9 @@
       activationUsage: data.activation ?? null,
       expiresAt: data.expires_at ? new Date(data.expires_at).getTime() : null,
       productId: data.product_id || null,
+      entitlementPayload: envelope.entitlement_payload || '',
+      entitlementSig: envelope.entitlement_sig || '',
+      entitlementExpiresAt: entitlement.entitlement.exp * 1000,
     };
     await safeStorageSet({ [STORAGE_KEY]: record });
     pushTier();
@@ -181,12 +198,34 @@
       return;
     }
     const data = envelope?.data || {};
+    if (envelope?.ok && !isXvmProduct(data.product_id)) {
+      await safeStorageRemove(STORAGE_KEY);
+      pushTier();
+      return;
+    }
+    let entitlement = { ok: false, error: 'missing_entitlement' };
+    if (envelope?.ok) {
+      entitlement = await verifyEntitlementEnvelope(envelope, {
+        productId: data.product_id,
+        instanceId: stored.instanceId,
+        key: stored.key,
+      }, isXvmProduct);
+      if (!entitlement.ok) {
+        await safeStorageRemove(STORAGE_KEY);
+        pushTier();
+        return;
+      }
+    }
     const updated = {
       ...stored,
       status: data.status || stored.status || 'active',
       activationLimit: data.activation_limit ?? stored.activationLimit,
       activationUsage: data.activation ?? stored.activationUsage,
       expiresAt: data.expires_at ? new Date(data.expires_at).getTime() : stored.expiresAt,
+      productId: data.product_id || stored.productId,
+      entitlementPayload: envelope?.entitlement_payload || stored.entitlementPayload || '',
+      entitlementSig: envelope?.entitlement_sig || stored.entitlementSig || '',
+      entitlementExpiresAt: entitlement.entitlement?.exp ? entitlement.entitlement.exp * 1000 : stored.entitlementExpiresAt,
       lastTriedAt: Date.now(),
     };
     if (envelope?.ok && (data.status === 'active' || !data.status)) {
@@ -204,7 +243,7 @@
     const status = licenseStatusFrom(stored, Date.now());
     // Stale-cache side-effect: kick off background revalidate. The pure
     // helper just reports the verdict; we own the I/O.
-    if (status.source === 'offline-grace' && stored) {
+    if ((status.source === 'offline-grace' || status.source === 'invalid_entitlement' || status.source === 'missing_product') && stored) {
       revalidateInBackground(stored).catch(() => {});
     }
     return status;
@@ -215,7 +254,7 @@
     const trial = await safeStorageGet(TRIAL_KEY, null);
     const r = resolveTierFrom(stored, trial, Date.now());
     // Side-effect: if the verdict served from offline-grace, kick revalidate.
-    if (r.source === 'offline-grace' && stored) {
+    if ((r.source === 'offline-grace' || r.source === 'invalid_entitlement' || r.source === 'missing_product') && stored) {
       revalidateInBackground(stored).catch(() => {});
     }
     return r;

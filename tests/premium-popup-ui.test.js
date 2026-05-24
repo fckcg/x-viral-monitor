@@ -53,6 +53,11 @@ describe('#45 step 3 — popup pro UI', () => {
     expect(a).toBe(b);
   });
 
+  it('popup.html loads entitlement verifier before popup-pro.js', () => {
+    expect(html.indexOf('src/premium/license/entitlement.js')).toBeGreaterThan(-1);
+    expect(html.indexOf('src/premium/license/entitlement.js')).toBeLessThan(html.indexOf('src/premium/license/popup-pro.js'));
+  });
+
   it('popup-pro.js delegates tier resolution to tier-logic.js (no inline duplication)', () => {
     // After the Codex Blocker #1 refactor, RECHECK_INTERVAL_MS /
     // OFFLINE_GRACE_MS / TRIAL_DAYS are owned by tier-logic.js only.
