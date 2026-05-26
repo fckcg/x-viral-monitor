@@ -5,6 +5,19 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ---
 
+## [1.7.6] - 2026-05-26
+
+### Changed
+
+- Limited content filtering to reply cells on tweet detail pages only; home, profile, search, lists, and the main tweet are left untouched.
+- Moved the filtered-replies summary into the reply timeline instead of the page-level top area.
+
+### Added
+
+- Added a popup "All rules" view showing built-in and custom content-filter rules grouped by field, with custom-rule deletion from the same list.
+
+---
+
 ## [1.7.5] - 2026-05-26
 
 ### Fixed

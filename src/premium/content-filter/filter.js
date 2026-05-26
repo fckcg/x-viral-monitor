@@ -305,7 +305,12 @@
       updateSummary();
       return;
     }
-    const arts = document.querySelectorAll('article[data-testid="tweet"]');
+    if (!isTweetDetailPage()) {
+      revoke();
+      updateSummary();
+      return;
+    }
+    const arts = replyArticles();
     for (const art of arts) {
       const id = getTweetIdFromArticle(art);
       if (!id) continue;
@@ -314,7 +319,8 @@
       if (d?.hide) {
         if (cell?.style) cell.style.display = 'none';
         setHideMarker(art, cell, d.reason || 'matched');
-        hiddenRecords.set(id, recordFromDecision(id, d));
+        const record = recordFromDecision(id, d);
+        hiddenRecords.set(id, record);
       } else if (hasContentHideMarker(art, cell)) {
         removeHideMarker(art, cell);
         hiddenRecords.delete(id);
@@ -333,6 +339,7 @@
       handle: raw.author?.handle || '',
       content: raw.content || '',
       matches: d.matches || [],
+      ts: Date.now(),
     };
   }
 
@@ -393,18 +400,45 @@
     ensureStyle();
     let bar = document.getElementById('xvm-content-filter-summary');
     if (bar) return bar;
-    const firstCell = document.querySelector('[data-testid="cellInnerDiv"]');
-    const container = firstCell?.parentElement;
-    if (!container) return null;
+    const anchor = findReplyAnchor();
+    if (!anchor?.container) return null;
     bar = document.createElement('div');
     bar.id = 'xvm-content-filter-summary';
     bar.className = 'xvm-cf-summary';
     bar.addEventListener('click', () => {
       summaryOpen = !summaryOpen;
       bar.dataset.open = summaryOpen ? '1' : '0';
+      summarySignature = '';
+      updateSummary();
     });
-    container.insertBefore(bar, container.firstChild);
+    anchor.container.insertBefore(bar, anchor.before || null);
     return bar;
+  }
+
+  function isTweetDetailPage() {
+    return /\/status\/\d+/.test(window.location?.pathname || '');
+  }
+
+  function replyArticles() {
+    if (!isTweetDetailPage()) return [];
+    const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]'));
+    const articleCells = cells
+      .map((cell) => ({ cell, art: cell.querySelector?.('article[data-testid="tweet"]') }))
+      .filter((item) => item.art);
+    if (articleCells.length <= 1) return [];
+    return articleCells.slice(1).map((item) => item.art);
+  }
+
+  function findReplyAnchor() {
+    if (!isTweetDetailPage()) return null;
+    const cells = Array.from(document.querySelectorAll('[data-testid="cellInnerDiv"]'));
+    const firstArticleCell = cells.find((cell) => cell.querySelector?.('article[data-testid="tweet"]'));
+    const replyCell = cells.find((cell) => {
+      const art = cell.querySelector?.('article[data-testid="tweet"]');
+      return art && cell !== firstArticleCell;
+    });
+    const before = replyCell || firstArticleCell;
+    return before?.parentElement ? { container: before.parentElement, before } : null;
   }
 
   function updateSummary() {
@@ -509,6 +543,9 @@
       scanForTweets,
       applyHidesNow,
       updateSummary,
+      isTweetDetailPage,
+      replyArticles,
+      findReplyAnchor,
       isOwnMutation,
       scheduleApply,
       gateOpen,

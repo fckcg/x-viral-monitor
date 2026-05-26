@@ -95,6 +95,7 @@
     if (!section) return null;
     section.innerHTML = `
       <h2 class="cf-title" data-k="cfTitle"></h2>
+      <p class="rf-rule-hint" data-k="cfScopeHint"></p>
 
       <label class="rf-toggle">
         <span data-k="cfEnabled"></span>
@@ -130,6 +131,11 @@
         <label class="rf-row cf-whitelist"><span data-k="cfWhitelistDomains"></span><input type="text" id="cf-whitelistDomains" /></label>
       </details>
 
+      <details class="cf-rules" open>
+        <summary data-k="cfAllRulesTitle"></summary>
+        <div id="cf-all-rules" class="cf-rule-list"></div>
+      </details>
+
       <p class="rf-rule-hint" data-k="cfRuleHint"></p>
       <div class="rf-actions">
         <button type="button" id="cf-save" class="rf-btn" data-k="rfSave"></button>
@@ -157,6 +163,7 @@
     section.querySelector('#cf-blacklistHandles').value = settings.blacklistHandles.join(', ');
     section.querySelector('#cf-whitelistDomains').value = settings.whitelistDomains.join(', ');
     renderCustomList(section, settings);
+    renderAllRules(section, settings);
   }
 
   function readFrom(section, current) {
@@ -186,6 +193,51 @@
     });
   }
 
+  function renderAllRules(section, settings) {
+    const list = section.querySelector('#cf-all-rules');
+    if (!list) return;
+    const src = builtinRules();
+    const builtins = (src.rules || []).map((rule) => ({ ...rule, source: 'builtin' })).filter((rule) => rule.id && rule.value);
+    const customs = settings.customRules.map((rule, idx) => ({ ...rule, source: 'custom', customIndex: idx }));
+    const groups = new Map();
+    for (const rule of [...builtins, ...customs]) {
+      const key = rule.field || 'content';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(rule);
+    }
+    if (!groups.size) {
+      list.innerHTML = `<p class="rf-rule-hint">${t('cfNoRules')}</p>`;
+      return;
+    }
+    list.innerHTML = Array.from(groups.entries()).map(([field, rules]) => `
+      <details class="cf-rule-group" open>
+        <summary>${escapeHtml(field)} · ${rules.length}</summary>
+        <div class="cf-rule-items">
+          ${rules.map(renderRuleRow).join('')}
+        </div>
+      </details>
+    `).join('');
+  }
+
+  function renderRuleRow(rule) {
+    const level = ruleLevels(rule.id).join('/') || '-';
+    const readonly = rule.source !== 'custom';
+    const label = readonly ? t('cfBuiltinRule') : t('cfCustomRule');
+    const action = readonly ? '' : `<button type="button" data-del-rule="${rule.customIndex}" aria-label="${t('cfDeleteRule')}">×</button>`;
+    return `<div class="cf-rule-row" data-source="${escapeAttr(rule.source || '')}">
+      <div class="cf-rule-main">
+        <b>${escapeHtml(rule.value)}</b>
+        <span>${escapeHtml(label)} · ${escapeHtml(rule.type)} / ${escapeHtml(rule.field)} / ${escapeHtml(rule.severity)} · ${escapeHtml(level)}</span>
+      </div>
+      ${action}
+    </div>`;
+  }
+
+  function ruleLevels(id) {
+    const levels = builtinRules().levels || {};
+    return ['light', 'standard', 'strict'].filter((level) => (levels[level] || []).includes(id));
+  }
+
   function flash(section, key) {
     const msg = section.querySelector('#cf-msg');
     msg.textContent = t(key);
@@ -195,6 +247,10 @@
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/`/g, '&#96;');
   }
 
   async function mount() {
@@ -225,6 +281,13 @@
     });
     section.querySelector('#cf-custom-list').addEventListener('click', (event) => {
       const idx = event.target?.dataset?.del;
+      if (idx == null) return;
+      settings = readFrom(section, settings);
+      settings.customRules.splice(Number(idx), 1);
+      applyTo(section, settings);
+    });
+    section.querySelector('#cf-all-rules').addEventListener('click', (event) => {
+      const idx = event.target?.dataset?.delRule;
       if (idx == null) return;
       settings = readFrom(section, settings);
       settings.customRules.splice(Number(idx), 1);

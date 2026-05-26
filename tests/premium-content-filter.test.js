@@ -36,7 +36,7 @@ function loadDebug(overrides = {}) {
     document: overrides.document || {
       documentElement: { appendChild() {} },
       getElementById: () => null,
-      createElement: () => ({ id: '', textContent: '', style: {}, appendChild() {}, addEventListener() {} }),
+      createElement: () => ({ id: '', textContent: '', style: {}, dataset: {}, appendChild() {}, addEventListener() {} }),
       querySelector: () => null,
       querySelectorAll: () => [],
     },
@@ -73,19 +73,29 @@ function attrNode(kind) {
 }
 
 function contentFilterDomHarness() {
+  const root = { insertBefore() {}, firstChild: null };
+  const mainCell = attrNode('cell');
+  const mainArticle = attrNode('article');
   const cell = attrNode('cell');
   const article = attrNode('article');
+  const mainLink = { getAttribute: () => '/owner/status/0' };
   const link = { getAttribute: () => '/spam/status/1' };
+  mainCell.parentElement = root;
+  cell.parentElement = root;
+  mainArticle.closest = (selector) => (selector === '[data-testid="cellInnerDiv"]' ? mainCell : null);
+  mainArticle.querySelector = (selector) => (selector.includes('/status/') ? mainLink : null);
+  mainCell.querySelector = (selector) => (selector === 'article[data-testid="tweet"]' ? mainArticle : null);
   article.closest = (selector) => (selector === '[data-testid="cellInnerDiv"]' ? cell : null);
   article.querySelector = (selector) => (selector.includes('/status/') ? link : null);
   cell.querySelector = (selector) => (selector === 'article[data-testid="tweet"]' ? article : null);
   const document = {
     documentElement: { appendChild() {} },
     getElementById: () => null,
-    createElement: () => ({ id: '', textContent: '', style: {}, appendChild() {}, addEventListener() {} }),
+    createElement: () => ({ id: '', textContent: '', style: {}, dataset: {}, appendChild() {}, addEventListener() {} }),
     querySelector: () => null,
     querySelectorAll(selector) {
-      if (selector === 'article[data-testid="tweet"]') return [article];
+      if (selector === 'article[data-testid="tweet"]') return [mainArticle, article];
+      if (selector === '[data-testid="cellInnerDiv"]') return [mainCell, cell];
       if (selector.includes('cellInnerDiv') && selector.includes('data-xvm-content-filter-hidden')) {
         const out = [];
         if (article.hasAttribute('data-xvm-content-filter-hidden')) out.push(article);
@@ -116,7 +126,7 @@ function contentFilterDomHarness() {
       },
     },
   };
-  return { article, cell, document, tweet };
+  return { article, cell, mainArticle, mainCell, document, tweet };
 }
 
 describe('#123 XVM content filter v1', () => {
@@ -151,6 +161,10 @@ describe('#123 XVM content filter v1', () => {
     expect(popupFilter).toMatch(/whitelistDomains/);
     expect(popupFilter).toMatch(/whitelistFollowing/);
     expect(popupFilter).toMatch(/blacklistHandles/);
+    expect(popupFilter).toMatch(/renderAllRules/);
+    expect(popupFilter).toMatch(/cf-all-rules/);
+    expect(popupFilter).toMatch(/data-del-rule/);
+    expect(popupHtml).toMatch(/cf-rule-list/);
     expect(popupFilter).not.toMatch(/setLocked\(section,\s*tier\s*===\s*['"]free['"]\)/);
     expect(popupFilter).not.toMatch(/cf-locked-hint/);
   });
@@ -364,7 +378,7 @@ describe('#123 XVM content filter v1', () => {
 
   it('content-filter is opt-in and restores hidden cells when disabled', () => {
     const h = contentFilterDomHarness();
-    const api = loadDebug({ document: h.document });
+    const api = loadDebug({ document: h.document, window: { location: { pathname: '/rwayne/status/2059141230542671887' } } });
     api.updateSettings({ enabled: false, level: 'standard', whitelistFollowing: false });
     api._debug.scanForTweets({ tweet_results: { result: h.tweet } });
     api._debug.applyHidesNow();
@@ -382,6 +396,27 @@ describe('#123 XVM content filter v1', () => {
     expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
     expect(h.cell.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
     expect(h.cell.style.display || '').toBe('');
+  });
+
+  it('only filters reply cells on tweet detail pages', () => {
+    const h = contentFilterDomHarness();
+    const homeApi = loadDebug({ document: h.document, window: { location: { pathname: '/home' } } });
+    homeApi.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
+    homeApi._debug.scanForTweets({ tweet_results: { result: h.tweet } });
+    homeApi._debug.applyHidesNow();
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+    expect(h.cell.style.display || '').toBe('');
+
+    const detail = contentFilterDomHarness();
+    const detailApi = loadDebug({ document: detail.document, window: { location: { pathname: '/rwayne/status/2059141230542671887' } } });
+    detailApi.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
+    detailApi._debug.scanForTweets({ tweet_results: { result: detail.tweet } });
+    detailApi._debug.applyHidesNow();
+    expect(detail.mainArticle.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+    expect(detail.mainCell.style.display || '').toBe('');
+    expect(detail.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);
+    expect(detail.cell.style.display).toBe('none');
+    expect(detailApi._debug.replyArticles()).toHaveLength(1);
   });
 
   it('ignores summary DOM mutations and debounces external observer work', () => {
@@ -439,7 +474,7 @@ describe('#123 XVM content filter v1', () => {
         return null;
       },
     };
-    const api = loadDebug({ document });
+    const api = loadDebug({ document, window: { location: { pathname: '/rwayne/status/2059141230542671887' } } });
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
     api._debug.scanForTweets({ tweet_results: { result: h.tweet } });
     api._debug.applyHidesNow();
