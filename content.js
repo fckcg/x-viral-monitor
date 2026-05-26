@@ -811,11 +811,13 @@ function renderBadges() {
     // 🌱 normal | 🚀 trending | 🔥 viral
     const prefix = velocity >= velocityThresholds.viral ? '\u{1F525}' : velocity >= velocityThresholds.trending ? '\u{1F680}' : '\u{1F331}';
     const colorClass = velocity >= velocityThresholds.viral ? 'xvm-badge--red' : velocity >= velocityThresholds.trending ? 'xvm-badge--orange' : 'xvm-badge--green';
+    const velocityLabel = formatVelocity(velocity);
+    if (!prefix || !velocityLabel) continue;
 
     const badge = document.createElement('span');
     badge.className = `xvm-badge ${colorClass}`;
     badge.dataset.prefix = prefix;
-    badge.dataset.velocity = formatVelocity(velocity);
+    badge.dataset.velocity = velocityLabel;
 
     // Tooltip: show/hide a single shared fixed element
     const postedDate = new Date(data.createdAt);
@@ -831,7 +833,7 @@ function renderBadges() {
       `${i18n('contentRetweets')}: ${data.retweets.toLocaleString()}\n` +
       `${i18n('contentReplies')}: ${data.replies.toLocaleString()}\n` +
       `${i18n('contentBookmarks')}: ${data.bookmarks.toLocaleString()}\n` +
-      `${i18n('contentVelocity')}: ${formatVelocity(velocity)}/h\n` +
+      `${i18n('contentVelocity')}: ${velocityLabel}/h\n` +
       `${i18n('contentViralScore')}: ${score}/100\n` +
       `${i18n('contentPosted')}: ${postedStr}`;
 

@@ -18,6 +18,14 @@
   white-space: nowrap;
 }
 
+.xvm-badge:empty,
+.xvm-badge:not([data-prefix]),
+.xvm-badge:not([data-velocity]),
+.xvm-badge[data-prefix=""],
+.xvm-badge[data-velocity=""] {
+  display: none !important;
+}
+
 .xvm-badge::before { content: attr(data-prefix); }
 .xvm-badge::after { content: attr(data-velocity) "/h"; }
 

@@ -72,7 +72,7 @@ function attrNode(kind) {
   };
 }
 
-function contentFilterDomHarness({ domName = 'Spam @spam', domContent = 'hello' } = {}) {
+function contentFilterDomHarness({ domName = 'Spam @spam', domContent = 'hello', emojiAlt = '' } = {}) {
   const root = {
     children: [],
     firstChild: null,
@@ -91,7 +91,12 @@ function contentFilterDomHarness({ domName = 'Spam @spam', domContent = 'hello' 
   const mainLink = { getAttribute: () => '/rwayne/status/2059141230542671887' };
   const link = { getAttribute: () => '/spam/status/1' };
   const nameNode = { textContent: domName };
-  const textNode = { textContent: domContent };
+  const textNode = {
+    textContent: domContent,
+    querySelectorAll: (selector) => (selector === 'img[alt]' && emojiAlt
+      ? [{ alt: emojiAlt, getAttribute: () => emojiAlt }]
+      : []),
+  };
   mainCell.parentElement = root;
   cell.parentElement = root;
   root.children = [mainCell, cell];
@@ -187,6 +192,14 @@ describe('#123 XVM content filter v1', () => {
     expect(popupHtml).toMatch(/cf-rule-list/);
     expect(popupFilter).not.toMatch(/setLocked\(section,\s*tier\s*===\s*['"]free['"]\)/);
     expect(popupFilter).not.toMatch(/cf-locked-hint/);
+  });
+
+  it('badge CSS hides empty or incomplete velocity badges', () => {
+    const styles = readFileSync(resolve(repo, 'styles.css'), 'utf8');
+    expect(styles).toMatch(/\.xvm-badge:empty/);
+    expect(styles).toMatch(/\.xvm-badge:not\(\[data-prefix\]\)/);
+    expect(styles).toMatch(/\.xvm-badge:not\(\[data-velocity\]\)/);
+    expect(content).toMatch(/if \(!prefix \|\| !velocityLabel\) continue/);
   });
 
   it('rules.json declares levels and valid rule shape', () => {
@@ -363,9 +376,15 @@ describe('#123 XVM content filter v1', () => {
     };
     const symbolSpam = {
       id: 'rwayne-3',
-      content: '༺࿌༈💋💦༈࿌༻',
+      content: 'X65b💋',
       urls: [],
       author: { handle: 'sym', name: 'Normal', bio: '', location: '' },
+    };
+    const strippedSymbolSpam = {
+      id: 'li-1',
+      content: 'X65b',
+      urls: [],
+      author: { handle: 'TPalo55791', name: 'Tiffiny Palo', bio: '', location: '' },
     };
     const normalShort = {
       id: 'ok-short',
@@ -383,6 +402,7 @@ describe('#123 XVM content filter v1', () => {
     expect(api._debug.classify(commission).matches.some((m) => m.id === 'spam-name-funnel-high')).toBe(true);
     expect(api._debug.classify(avatarFunnel).matches.some((m) => m.id === 'spam-name-funnel-high')).toBe(true);
     expect(api._debug.classify(symbolSpam).matches.some((m) => m.id === 'spam-short-symbol-content-high')).toBe(true);
+    expect(api._debug.classify(strippedSymbolSpam).matches.some((m) => m.id === 'spam-short-symbol-content-high')).toBe(true);
     expect(api._debug.classify(normalShort).hide).toBe(false);
     expect(api._debug.classify(resourceOk).hide).toBe(false);
   });
@@ -487,6 +507,15 @@ describe('#123 XVM content filter v1', () => {
   it('uses DOM fallback for reply names when GraphQL fields are missing', () => {
     const h = contentFilterDomHarness({ domName: '互联网赚（点头像） @RKinnear7273', domContent: 'hello' });
     const api = loadDebug({ document: h.document, window: { location: { pathname: '/rwayne/status/2059141230542671887' } } });
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
+    api._debug.applyHidesNow();
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);
+    expect(h.cell.style.display).toBe('none');
+  });
+
+  it('DOM fallback includes emoji alt text for short spam replies', () => {
+    const h = contentFilterDomHarness({ domName: 'Tiffiny Palo @TPalo55791', domContent: 'X 65 b', emojiAlt: '💋' });
+    const api = loadDebug({ document: h.document, window: { location: { pathname: '/Li665508Li/status/2059186392559911332' } } });
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
     api._debug.applyHidesNow();
     expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);

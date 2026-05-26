@@ -5,6 +5,16 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ---
 
+## [1.7.8] - 2026-05-26
+
+### Fixed
+
+- Fixed empty XVM velocity badges appearing in tweet author headers when badge data was incomplete.
+- Improved content-filter DOM fallback extraction by preserving emoji image alt text from X replies.
+- Tightened short spam reply detection for letter/number/emoji patterns while preserving normal short Chinese replies.
+
+---
+
 ## [1.7.7] - 2026-05-26
 
 ### Changed

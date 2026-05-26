@@ -224,6 +224,16 @@
     return String(node?.textContent || '').trim();
   }
 
+  function visibleTextOf(node) {
+    if (!node) return '';
+    const text = textOf(node);
+    const alts = Array.from(node.querySelectorAll?.('img[alt]') || [])
+      .map((img) => img?.alt || img?.getAttribute?.('alt') || '')
+      .filter(Boolean)
+      .join('');
+    return `${text}${alts}`.trim();
+  }
+
   function extractDomTweet(art, id = getTweetIdFromArticle(art)) {
     if (!art || !id) return null;
     const nameNode = art.querySelector?.('[data-testid="User-Name"]');
@@ -232,12 +242,12 @@
     const urls = links
       .map((a) => a?.href || a?.getAttribute?.('href') || '')
       .filter((href) => href && !/\/status\/\d+/.test(href));
-    const userText = textOf(nameNode);
+    const userText = visibleTextOf(nameNode);
     const handle = (userText.match(/@([A-Za-z0-9_]+)/) || [])[1] || '';
     const name = userText.replace(/@[\w_]+.*/s, '').trim();
     return {
       id,
-      content: textOf(textNode),
+      content: visibleTextOf(textNode),
       createdAt: '',
       urls: [...new Set(urls)],
       author: {
@@ -342,7 +352,9 @@
     if ((s.match(/[\u4e00-\u9fff]/g) || []).length >= 2) return false;
     const alnum = (s.match(/[A-Za-z0-9]/g) || []).length;
     const symbols = (s.match(/[\u0F00-\u0FFF\u2000-\u206F\u2600-\u27BF\uFE00-\uFE0F\u{1F000}-\u{1FAFF}]/gu) || []).length;
-    return symbols >= 3 && symbols >= alnum;
+    if (symbols >= 3 && symbols >= alnum) return true;
+    if (/[A-Za-z]/.test(s) && /\d/.test(s) && symbols >= 1) return true;
+    return /^[A-Za-z]{1,2}\d{1,3}[A-Za-z]{1,2}$/u.test(s);
   }
 
   function cellForArticle(art) {
