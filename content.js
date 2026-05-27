@@ -1123,13 +1123,47 @@ function scopeFromPath(pathname = window.location.pathname) {
 }
 const SCOPE_KEY_FOR = { home: 'scopeHome', list: 'scopeList', profile: 'scopeProfile', status: 'scopeStatus' };
 let _rateFilterScopes = { scopeHome: false, scopeList: false, scopeProfile: false, scopeStatus: false };
-// rate-filter pushes the scope of the actual GraphQL endpoint producing
-// data, which is authoritative for /home pinned-list tabs (URL says home,
-// data comes from list endpoint). Falls back to URL inference until the
-// first response fires.
+// Three signals feed into the leaderboard's current scope:
+//   1. _activeScope: pushed by rate-filter on each GraphQL response
+//      (authoritative for the first visit to a tab, but stale on
+//      cached re-visits where X doesn't re-fetch).
+//   2. _tabSelectedScope: derived from the currently aria-selected
+//      [role=tab] in the DOM. This is set on tab clicks and via
+//      MutationObserver, so it survives cached re-visits.
+//   3. scopeFromPath(): URL fallback for cold start before either
+//      signal lands.
+// Priority: tab-selected > active-from-graphql > URL. The tab-selected
+// signal wins because the user just told us which tab they want; the
+// GraphQL signal can lag or be entirely missing on cached navigations.
 let _activeScope = null;
+let _tabSelectedScope = null;
+const HOME_SUB_TAB_LABELS = new Set([
+  'For you', 'Following', 'Subscribed',
+  '为你推荐', '正在关注', '订阅',
+  'おすすめ', 'フォロー中', '購読中',
+]);
+function detectScopeFromActiveTab() {
+  // Only meaningful when the page IS one that uses a tablist for scope
+  // switching (currently /home, where For you / Following / pinned lists
+  // share the URL). On other pages the URL is authoritative.
+  if (window.location.pathname !== '/home') return null;
+  const tab = document.querySelector('[role="tablist"] [role="tab"][aria-selected="true"]');
+  if (!tab) return null;
+  const txt = (tab.textContent || '').trim();
+  if (!txt) return null;
+  if (HOME_SUB_TAB_LABELS.has(txt)) return 'home';
+  // Anything else under the home tablist is a pinned list tab.
+  return 'list';
+}
+function syncTabSelectedScope() {
+  const next = detectScopeFromActiveTab();
+  if (next !== _tabSelectedScope) {
+    _tabSelectedScope = next;
+    setLeaderboardHotSwitchState();
+  }
+}
 function currentLeaderboardScope() {
-  return _activeScope || scopeFromPath();
+  return _tabSelectedScope || _activeScope || scopeFromPath();
 }
 function currentScopeEnabled() {
   const scope = currentLeaderboardScope();
@@ -1155,7 +1189,43 @@ function setLeaderboardHotSwitchState() {
     cb.disabled = tier === 'free' || !supportedHere;
   }
 }
+// Track X's tablist aria-selected so the leaderboard hot toggle reflects
+// the user's actual selected tab — not the URL (which is /home for
+// pinned-list tabs too) and not the most recent GraphQL response (which
+// may not fire when X serves a cached tab from memory).
+function installTabSelectedObserver() {
+  // Click delegation: when the user clicks any role=tab, re-detect after
+  // X swaps aria-selected. The setTimeout lets X's handler run first.
+  document.addEventListener('click', (ev) => {
+    const tab = ev.target?.closest?.('[role="tab"]');
+    if (!tab) return;
+    setTimeout(syncTabSelectedScope, 50);
+    setTimeout(syncTabSelectedScope, 250);
+  }, true);
+
+  // Mutation observer: catches programmatic tab switches and the case
+  // where the tablist mounts after content.js runs. Idempotent — once
+  // we find the tablist we only observe it once.
+  let observed = null;
+  function attach() {
+    const tl = document.querySelector('[role="tablist"]');
+    if (!tl || tl === observed) return;
+    observed = tl;
+    const mo = new MutationObserver(syncTabSelectedScope);
+    mo.observe(tl, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+    syncTabSelectedScope();
+  }
+  attach();
+  // Watch document body for tablist appearing later.
+  if (!attach.__bodyMo) {
+    const bodyMo = new MutationObserver(() => attach());
+    if (document.body) bodyMo.observe(document.body, { childList: true, subtree: true });
+    attach.__bodyMo = bodyMo;
+  }
+}
+
 function installLeaderboardFilterStateSync() {
+  installTabSelectedObserver();
   window.addEventListener('message', (ev) => {
     if (ev.source !== window) return;
     if (ev.data?.type === 'XVM_RATE_SETTINGS_UPDATE' && ev.data.settings) {
@@ -1182,11 +1252,16 @@ function installLeaderboardFilterStateSync() {
   const checkPath = () => {
     if (window.location.pathname === lastPath) return;
     lastPath = window.location.pathname;
-    // Drop the previously observed GraphQL scope — until the new page's
-    // first response arrives, fall back to URL-based inference. Otherwise
-    // an in-flight toggle would write to the previous page's scope key.
+    // Drop the previously observed signals — until the new page's first
+    // response and tab-selected mutation land, fall back to URL-based
+    // inference. Otherwise an in-flight toggle could write to the
+    // previous page's scope key.
     _activeScope = null;
+    _tabSelectedScope = null;
     setLeaderboardHotSwitchState();
+    // The new page may have its own tablist; re-detect ASAP.
+    setTimeout(syncTabSelectedScope, 100);
+    setTimeout(syncTabSelectedScope, 500);
   };
   window.addEventListener('popstate', checkPath);
   // Hook pushState/replaceState since SPAs don't emit popstate for them.
