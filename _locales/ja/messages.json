@@ -430,7 +430,7 @@
   "cfLevelStrict":  { "message": "強め" },
   "cfRuleCounts":   { "message": "内蔵ルール $COUNT$ 件、カスタム $CUSTOM$ 件が有効です。", "placeholders": { "COUNT": { "content": "$1" }, "CUSTOM": { "content": "$2" } } },
   "cfCustomTitle":  { "message": "カスタムルール" },
-  "cfWhitelistAdvancedTitle": { "message": "ホワイトリスト / ブラックリスト詳細" },
+  "cfWhitelistTitle": { "message": "ホワイトリスト / ブラックリスト設定" },
   "cfValue":        { "message": "キーワード / 正規表現 / ドメイン" },
   "cfAddRule":      { "message": "ルールを追加" },
   "cfDeleteRule":   { "message": "ルールを削除" },

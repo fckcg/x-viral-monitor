@@ -161,18 +161,16 @@
       <p class="rf-rule-hint cf-rules-source" id="cf-rules-source"></p>
       <button type="button" id="cf-rules-refresh" class="rf-btn-ghost cf-rules-refresh" data-k="cfRulesRefresh"></button>
 
-      <div class="cf-whitelist-block">
+      <details class="cf-custom" id="cf-whitelist-details">
+        <summary data-k="cfWhitelistTitle"></summary>
         <label class="rf-scope-switch cf-following">
           <input type="checkbox" id="cf-whitelistFollowing" />
           <span data-k="cfWhitelistFollowing"></span>
         </label>
-        <details class="cf-whitelist-advanced">
-          <summary data-k="cfWhitelistAdvancedTitle"></summary>
-          <label class="rf-row cf-whitelist"><span data-k="cfWhitelistHandles"></span><input type="text" id="cf-whitelistHandles" /></label>
-          <label class="rf-row cf-whitelist"><span data-k="cfBlacklistHandles"></span><input type="text" id="cf-blacklistHandles" /></label>
-          <label class="rf-row cf-whitelist"><span data-k="cfWhitelistDomains"></span><input type="text" id="cf-whitelistDomains" /></label>
-        </details>
-      </div>
+        <label class="rf-row cf-whitelist"><span data-k="cfWhitelistHandles"></span><input type="text" id="cf-whitelistHandles" /></label>
+        <label class="rf-row cf-whitelist"><span data-k="cfBlacklistHandles"></span><input type="text" id="cf-blacklistHandles" /></label>
+        <label class="rf-row cf-whitelist"><span data-k="cfWhitelistDomains"></span><input type="text" id="cf-whitelistDomains" /></label>
+      </details>
 
       <details class="cf-custom" id="cf-custom-details">
         <summary data-k="cfCustomTitle"></summary>
