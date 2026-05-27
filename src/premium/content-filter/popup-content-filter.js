@@ -5,6 +5,10 @@
 
 (function () {
   const STORAGE_KEY = 'xvm_content_filter_v1';
+  const RULES_KEY = 'xvm_content_filter_rules_remote_v1';
+  const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/Icy-Cat/x-viral-monitor/main/src/premium/content-filter/rules.json';
+  let cachedRemoteRules = null;
+  let cachedFetchedAt = 0;
   const DEFAULTS = {
     enabled: false,
     level: 'standard',
@@ -81,7 +85,47 @@
   }
 
   function builtinRules() {
+    if (cachedRemoteRules && Array.isArray(cachedRemoteRules.rules)) return cachedRemoteRules;
     return globalThis.__xvmContentFilterBuiltinRules || { levels: { light: [], standard: [], strict: [] }, rules: [] };
+  }
+
+  async function loadRemoteRulesCache() {
+    const rec = await storageGet(RULES_KEY, null);
+    if (rec && rec.payload && Array.isArray(rec.payload.rules)) {
+      cachedRemoteRules = rec.payload;
+      cachedFetchedAt = rec.fetchedAt || 0;
+    } else {
+      cachedRemoteRules = null;
+      cachedFetchedAt = 0;
+    }
+  }
+
+  function formatRelativeTime(ts) {
+    if (!ts) return '';
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return t('cfRulesJustNow');
+    if (diff < 3600_000) return t('cfRulesMinutesAgo', String(Math.round(diff / 60_000)));
+    if (diff < 86_400_000) return t('cfRulesHoursAgo', String(Math.round(diff / 3600_000)));
+    return t('cfRulesDaysAgo', String(Math.round(diff / 86_400_000)));
+  }
+
+  function rulesSourceText() {
+    if (cachedRemoteRules && cachedFetchedAt) {
+      return t('cfRulesSourceRemote', formatRelativeTime(cachedFetchedAt));
+    }
+    return t('cfRulesSourceBundled');
+  }
+
+  async function refreshRemoteRules() {
+    const res = await fetch(REMOTE_RULES_URL, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    if (!payload || !payload.levels || !Array.isArray(payload.rules)) {
+      throw new Error('invalid_payload');
+    }
+    const record = { fetchedAt: Date.now(), payload };
+    await storageSet({ [RULES_KEY]: record });
+    return record;
   }
 
   function ruleCount(level) {
@@ -111,6 +155,8 @@
         <button type="button" class="cf-level" data-level="strict"></button>
       </div>
       <p class="rf-rule-hint" id="cf-rule-count"></p>
+      <p class="rf-rule-hint cf-rules-source" id="cf-rules-source"></p>
+      <button type="button" id="cf-rules-refresh" class="rf-btn-ghost cf-rules-refresh" data-k="cfRulesRefresh"></button>
 
       <details class="cf-custom">
         <summary data-k="cfCustomTitle"></summary>
@@ -158,6 +204,8 @@
     });
     section.dataset.level = settings.level;
     section.querySelector('#cf-rule-count').textContent = t('cfRuleCounts', ruleCount(settings.level), settings.customRules.length);
+    const srcEl = section.querySelector('#cf-rules-source');
+    if (srcEl) srcEl.textContent = rulesSourceText();
     section.querySelector('#cf-whitelistFollowing').checked = settings.whitelistFollowing !== false;
     section.querySelector('#cf-whitelistHandles').value = settings.whitelistHandles.join(', ');
     section.querySelector('#cf-blacklistHandles').value = settings.blacklistHandles.join(', ');
@@ -254,6 +302,7 @@
   }
 
   async function mount() {
+    await loadRemoteRulesCache();
     const section = buildSection();
     if (!section) return;
     let settings = normalize(await storageGet(STORAGE_KEY, DEFAULTS));
@@ -304,12 +353,36 @@
       applyTo(section, settings);
       flash(section, 'rfResetOk');
     });
+    section.querySelector('#cf-rules-refresh').addEventListener('click', async (event) => {
+      const btn = event.currentTarget;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = t('cfRulesRefreshing');
+      try {
+        await refreshRemoteRules();
+        // storage.onChanged will reload cachedRemoteRules and re-render.
+        flash(section, 'cfRulesRefreshOk');
+      } catch (_) {
+        flash(section, 'cfRulesRefreshErr');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    });
 
     try {
       chrome.storage.onChanged.addListener(async (changes, area) => {
         if (area !== 'local') return;
         if (STORAGE_KEY in changes) {
           settings = normalize(changes[STORAGE_KEY].newValue);
+          applyTo(section, settings);
+        }
+        if (RULES_KEY in changes) {
+          await loadRemoteRulesCache();
+          // Re-render level counts and source text with the new ruleset.
+          section.querySelector('[data-level="light"]').textContent = `${t('cfLevelLight')} · ${ruleCount('light')}`;
+          section.querySelector('[data-level="standard"]').textContent = `${t('cfLevelStandard')} · ${ruleCount('standard')}`;
+          section.querySelector('[data-level="strict"]').textContent = `${t('cfLevelStrict')} · ${ruleCount('strict')}`;
           applyTo(section, settings);
         }
       });

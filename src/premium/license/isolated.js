@@ -314,6 +314,11 @@
       window.postMessage({ type: 'XVM_LICENSE_DEACTIVATE_RESULT', ok: !!res.ok }, '*');
       return;
     }
+    if (t === 'XVM_CONTENT_FILTER_RULES_REFRESH') {
+      await fetchRemoteContentFilterRules({ force: true });
+      window.postMessage({ type: 'XVM_CONTENT_FILTER_RULES_REFRESH_DONE' }, '*');
+      return;
+    }
   });
 
   // ─── Rate filter settings bridge ────────────────────────────────────
