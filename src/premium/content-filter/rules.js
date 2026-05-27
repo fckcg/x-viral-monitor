@@ -73,7 +73,7 @@
       "id": "adult-bio-medium",
       "type": "regex",
       "field": "bio",
-      "value": "(性生理|两性|私密|成人视频|成人视频|成人|福利姬)",
+      "value": "(性生理|两性|私密|成人视频|成人|福利姬)",
       "severity": "medium"
     },
     {

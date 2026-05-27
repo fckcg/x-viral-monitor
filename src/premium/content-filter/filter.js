@@ -215,6 +215,7 @@
       },
       possiblySensitive: legacy.possibly_sensitive === true || userLegacy.possibly_sensitive === true,
       promoted: !!tweet.promotedMetadata || !!tweet.promoted_metadata,
+      source: 'graphql',
     };
   }
 
@@ -278,8 +279,17 @@
   }
 
   function reclassifyAll() {
+    // Drop stale DOM-fallback entries so the next scanDomReplies tick
+    // re-extracts with the current settings. Without this, toggling
+    // whitelistFollowing leaves cached dom-fallback decisions with the
+    // hardcoded following:false, which stays hidden until full reload.
     for (const [id, d] of decisions) {
-      if (d.raw) decisions.set(id, { ...classify(d.raw), raw: d.raw });
+      if (!d.raw) continue;
+      if (d.raw.source === 'dom-fallback') {
+        decisions.delete(id);
+        continue;
+      }
+      decisions.set(id, { ...classify(d.raw), raw: d.raw });
     }
   }
 
@@ -315,6 +325,10 @@
     return hosts.some((h) => SETTINGS.whitelistDomains.includes(h));
   }
 
+  // Defense-in-depth duplicate of the `hard-telegram-group-funnel` rule in
+  // rules.json. Hardcoded here so a malformed / stale remote payload can't
+  // disable our most important spam class. If you ever remove the rule
+  // from rules.json this function still fires.
   function telegramFunnel(raw) {
     const text = `${raw.content || ''} ${raw.author?.bio || ''} ${raw.urls.join(' ')}`.toLowerCase();
     return /(t\.me|telegram|电报|飞机)/i.test(text)
@@ -407,7 +421,12 @@
       if (!id) continue;
       const d = decisions.get(id);
       const cell = cellForArticle(art);
-      if (d?.hide) {
+      // DOM-fallback decisions can't see whitelistFollowing (X doesn't expose
+      // the Follow relationship on reply article DOM). So we only let them
+      // fire on `block` severity — everything else waits for GraphQL data.
+      const effectiveHide = d?.hide
+        && (d.raw?.source !== 'dom-fallback' || (d.matches || []).some((m) => m.severity === 'block'));
+      if (effectiveHide) {
         if (cell?.style) cell.style.display = 'none';
         setHideMarker(art, cell, d.reason || 'matched');
         const record = recordFromDecision(id, d);
@@ -576,7 +595,16 @@
     bar.hidden = false;
     bar.dataset.open = summaryOpen ? '1' : '0';
     const items = records.map((r) => {
-      const tags = (r.matches || []).slice(0, 3).map((m) => `${escapeHtml(m.field)}:${escapeHtml(m.severity)}`).join(' / ');
+      const seen = new Set();
+      const tags = (r.matches || [])
+        .map((m) => `${m.field}:${m.severity}`)
+        .filter((k) => (seen.has(k) ? false : (seen.add(k), true)))
+        .slice(0, 3)
+        .map((k) => {
+          const [field, sev] = k.split(':');
+          return `${escapeHtml(field)}:${escapeHtml(sev)}`;
+        })
+        .join(' / ');
       return `<div class="xvm-cf-item">${r.avatar ? `<img src="${escapeAttr(r.avatar)}" alt="">` : '<span></span>'}<div><b>${escapeHtml(r.name)} ${r.handle ? `@${escapeHtml(r.handle)}` : ''}</b><p>${escapeHtml((r.content || '').slice(0, 120))}</p><span class="xvm-cf-tags">${tags}</span></div></div>`;
     }).join('');
     bar.innerHTML = `<strong>已过滤 ${hiddenRecords.size} 条回复 - XVM</strong><div class="xvm-cf-list">${items}</div>`;

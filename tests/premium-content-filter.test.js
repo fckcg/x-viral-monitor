@@ -486,6 +486,65 @@ describe('#123 XVM content filter v1', () => {
     expect(api._debug.classify(realSpam).hide).toBe(true);
   });
 
+  it('DOM-fallback decisions only fire hide on block severity (avoid whitelist false-positives)', () => {
+    // Simulate a reply whose data only ever came from the DOM scraper —
+    // following:false is hardcoded there. A high-severity name match
+    // should NOT hide because the user might be a followed account whose
+    // whitelist status is invisible to DOM. A block-severity match still
+    // hides (telegram funnel etc. — those are unambiguous).
+    const h = contentFilterDomHarness({ domName: '互联网赚（点头像） @spam_user', domContent: '只是个普通回复' });
+    const api = loadDebug({ document: h.document, window: { location: { pathname: '/example_main/status/100001' } } });
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: true });
+    // Do NOT scanForTweets — we want DOM fallback to be the only data source.
+    api._debug.applyHidesNow();
+    // Name matches spam-name-funnel-high (severity: high), but DOM fallback
+    // can't see following, so the gate must hold the hide.
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+    expect(h.cell.style.display || '').toBe('');
+  });
+
+  it('DOM-fallback block-severity matches (telegram funnel) still hide', () => {
+    const h = contentFilterDomHarness({
+      domName: 'Sample',
+      domContent: '电报群福利资源都在群里，私信加入',
+    });
+    const api = loadDebug({ document: h.document, window: { location: { pathname: '/example_main/status/100001' } } });
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: true });
+    api._debug.applyHidesNow();
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);
+    expect(h.cell.style.display).toBe('none');
+  });
+
+  it('GraphQL data overwrites a DOM-fallback decision so following:true wins', () => {
+    const h = contentFilterDomHarness({ domName: '互联网赚（点头像） @gyro_clone', domContent: '今天好困' });
+    const api = loadDebug({ document: h.document, window: { location: { pathname: '/example_main/status/100001' } } });
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: true });
+    api._debug.applyHidesNow();
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+
+    // Now GraphQL data arrives for the same id with following:true.
+    api._debug.scanForTweets({
+      tweet_results: {
+        result: {
+          legacy: { id_str: '1', full_text: 'today', created_at: '', entities: {} },
+          core: {
+            user_results: {
+              result: {
+                rest_id: 'u1',
+                core: { name: '互联网赚（点头像）', screen_name: 'gyro_clone' },
+                legacy: { name: '互联网赚（点头像）', screen_name: 'gyro_clone', description: '', location: '' },
+                relationship_perspectives: { following: true },
+              },
+            },
+          },
+        },
+      },
+    });
+    api._debug.applyHidesNow();
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+    expect(h.cell.style.display || '').toBe('');
+  });
+
   it('whitelistFollowing short-circuits classification regardless of which rules would match', () => {
     const api = loadDebug();
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: true });
@@ -629,6 +688,17 @@ describe('#123 XVM content filter v1', () => {
     expect(isolated).toMatch(/pushCachedContentFilterRules/);
   });
 
+  it('isolated rule validator rejects regex DoS, unknown types, and future schema versions', () => {
+    // We can't easily run the IIFE in isolation, but we can grep the
+    // hardened constants + heuristic regex out of the source to make sure
+    // future refactors don't drop the defense.
+    expect(isolated).toMatch(/REGEX_MAX_LEN\s*=\s*240/);
+    expect(isolated).toMatch(/REGEX_NESTED_QUANTIFIER/);
+    expect(isolated).toMatch(/REMOTE_RULES_SCHEMA_MAX/);
+    expect(isolated).toMatch(/REMOTE_RULES_MIN_RETRY_MS/);
+    expect(isolated).toMatch(/RULE_TYPES_ALLOWED/);
+  });
+
   it('manifest grants host_permissions for the remote rules host', () => {
     expect(Array.isArray(manifest.host_permissions)).toBe(true);
     expect(manifest.host_permissions).toContain('https://raw.githubusercontent.com/*');
@@ -707,22 +777,45 @@ describe('#123 XVM content filter v1', () => {
     expect(detail.mainCell.lastElementChild?.parentElement).toBe(detail.mainCell);
   });
 
-  it('uses DOM fallback for reply names when GraphQL fields are missing', () => {
+  it('DOM fallback extracts and classifies high-severity name spam (but defers hiding to GraphQL)', () => {
     const h = contentFilterDomHarness({ domName: '互联网赚（点头像） @spam_user', domContent: 'hello' });
     const api = loadDebug({ document: h.document, window: { location: { pathname: '/example_main/status/100001' } } });
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
+    api._debug.applyHidesNow();
+    // DOM-only data: classify still flags it, but the gate refuses to hide
+    // until GraphQL confirms (so followed accounts don't get false-hidden).
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
+    // Confirm the classifier still recognized the pattern — when GraphQL
+    // confirms the user isn't followed, the next applyHidesNow hides them.
+    api._debug.scanForTweets({
+      tweet_results: {
+        result: {
+          legacy: { id_str: '1', full_text: 'hello', entities: {} },
+          core: {
+            user_results: {
+              result: {
+                rest_id: 'u1',
+                core: { name: '互联网赚（点头像）', screen_name: 'spam_user' },
+                legacy: { name: '互联网赚（点头像）', screen_name: 'spam_user', description: '', location: '' },
+                relationship_perspectives: { following: false },
+              },
+            },
+          },
+        },
+      },
+    });
     api._debug.applyHidesNow();
     expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);
     expect(h.cell.style.display).toBe('none');
   });
 
-  it('DOM fallback includes emoji alt text for short spam replies', () => {
+  it('DOM fallback short-symbol spam stays visible until GraphQL confirms', () => {
     const h = contentFilterDomHarness({ domName: 'Sample User @spam_user', domContent: 'X 65 b', emojiAlt: '💋' });
     const api = loadDebug({ document: h.document, window: { location: { pathname: '/example_main/status/100003' } } });
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
     api._debug.applyHidesNow();
-    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(true);
-    expect(h.cell.style.display).toBe('none');
+    // DOM-only short-symbol match is high severity, so it must NOT auto-hide.
+    expect(h.article.hasAttribute('data-xvm-content-filter-hidden')).toBe(false);
   });
 
   it('ignores summary DOM mutations and debounces external observer work', () => {

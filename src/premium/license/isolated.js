@@ -63,6 +63,10 @@
   // rules.js when cache is empty AND fetch fails.
   const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/Icy-Cat/x-viral-monitor/main/src/premium/content-filter/rules.json';
   const REMOTE_RULES_TTL_MS = 6 * 60 * 60 * 1000;
+  // Even on failure, never re-attempt more than once per 5 min. Multi-tab
+  // users would otherwise hammer raw.githubusercontent.com per page load.
+  const REMOTE_RULES_MIN_RETRY_MS = 5 * 60 * 1000;
+  const REMOTE_RULES_SCHEMA_MAX = 1;
 
   const KEY_RE = /^[A-Za-z0-9_\-]{8,128}$/;
 
@@ -340,12 +344,39 @@
   }
 
   // ─── Remote content-filter rules ────────────────────────────────────
-  // Validate the shape we care about. A broken remote payload should not
-  // wipe out the cached-or-bundled rules.
+  // Validate the shape AND contents. A broken/malicious remote payload
+  // should not wipe out the cached-or-bundled rules and should not be
+  // able to inject a regex that catastrophically backtracks per reply.
+  const RULE_TYPES_ALLOWED = new Set(['keyword', 'regex', 'domain', 'short-symbol']);
+  const RULE_FIELDS_ALLOWED = new Set(['name', 'screen_name', 'bio', 'location', 'content', 'url']);
+  const RULE_SEVERITIES_ALLOWED = new Set(['low', 'medium', 'high', 'block']);
+  const REGEX_MAX_LEN = 240;
+  // Catastrophic backtracking heuristic: nested unbounded quantifiers
+  // like (.+)+ / (.*)*. Not exhaustive but blocks the obvious foot-guns.
+  const REGEX_NESTED_QUANTIFIER = /\([^()]*[+*][^()]*\)[+*?]/;
+
+  function isValidRule(rule) {
+    if (!rule || typeof rule !== 'object') return false;
+    if (!RULE_TYPES_ALLOWED.has(rule.type)) return false;
+    if (rule.field && !RULE_FIELDS_ALLOWED.has(rule.field)) return false;
+    if (!RULE_SEVERITIES_ALLOWED.has(rule.severity)) return false;
+    if (typeof rule.value !== 'string' || !rule.value.length) return false;
+    if (rule.type === 'regex') {
+      if (rule.value.length > REGEX_MAX_LEN) return false;
+      if (REGEX_NESTED_QUANTIFIER.test(rule.value)) return false;
+      try { new RegExp(rule.value, 'iu'); } catch (_) { return false; }
+    }
+    return true;
+  }
+
   function isValidRulesPayload(p) {
-    return p && typeof p === 'object'
-      && p.levels && typeof p.levels === 'object'
-      && Array.isArray(p.rules);
+    if (!p || typeof p !== 'object') return false;
+    if (!p.levels || typeof p.levels !== 'object') return false;
+    if (!Array.isArray(p.rules)) return false;
+    if (typeof p.version === 'number' && p.version > REMOTE_RULES_SCHEMA_MAX) return false;
+    // Reject the whole payload if ANY rule is invalid. Partial trust is a
+    // bigger surface to reason about than all-or-nothing.
+    return p.rules.every(isValidRule);
   }
 
   async function pushCachedContentFilterRules() {
@@ -364,15 +395,26 @@
 
   async function fetchRemoteContentFilterRules({ force = false } = {}) {
     const cached = await safeStorageGet(CONTENT_FILTER_RULES_KEY, null);
-    if (!force && cached?.fetchedAt && (Date.now() - cached.fetchedAt) < REMOTE_RULES_TTL_MS) {
-      return;
+    const now = Date.now();
+    if (!force) {
+      // Successful fetch within TTL → skip.
+      if (cached?.fetchedAt && (now - cached.fetchedAt) < REMOTE_RULES_TTL_MS) return;
+      // Recent attempt (success or failure) within retry floor → skip so
+      // a flapping network or down origin can't trigger a request per page.
+      if (cached?.lastAttemptedAt && (now - cached.lastAttemptedAt) < REMOTE_RULES_MIN_RETRY_MS) return;
     }
+    let payload = null;
     try {
       const res = await fetch(REMOTE_RULES_URL, { cache: 'no-cache' });
-      if (!res.ok) return;
-      const payload = await res.json();
-      if (!isValidRulesPayload(payload)) return;
-      const record = { fetchedAt: Date.now(), payload };
+      if (res.ok) {
+        const json = await res.json();
+        if (isValidRulesPayload(json)) payload = json;
+      }
+    } catch (_) {
+      // Network error: fall through to mark the attempt.
+    }
+    if (payload) {
+      const record = { fetchedAt: now, lastAttemptedAt: now, payload };
       await safeStorageSet({ [CONTENT_FILTER_RULES_KEY]: record });
       window.postMessage({
         type: 'XVM_CONTENT_FILTER_RULES_UPDATE',
@@ -380,9 +422,12 @@
         source: 'remote-fresh',
         fetchedAt: record.fetchedAt,
       }, '*');
-    } catch (_) {
-      // Network error: keep whatever cache / bundled rules were already
-      // serving. No user-visible failure mode for a background refresh.
+    } else if (cached) {
+      // Failed fetch — keep payload, just record the attempt so we throttle.
+      await safeStorageSet({ [CONTENT_FILTER_RULES_KEY]: { ...cached, lastAttemptedAt: now } });
+    } else {
+      // No cache and fetch failed — write a stub so retry-throttle applies.
+      await safeStorageSet({ [CONTENT_FILTER_RULES_KEY]: { lastAttemptedAt: now } });
     }
   }
 

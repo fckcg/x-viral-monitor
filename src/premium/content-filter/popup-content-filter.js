@@ -19,6 +19,9 @@
     blacklistHandles: [],
   };
   const FIELDS = ['name', 'screen_name', 'bio', 'location', 'content', 'url'];
+  // `short-symbol` is a builtin sentinel handled by isShortSymbolSpam in
+  // filter.js — users can't create it themselves, so it's intentionally
+  // omitted from the popup picker.
   const TYPES = ['keyword', 'regex', 'domain'];
   const SEVERITIES = ['low', 'medium', 'high', 'block'];
 
@@ -197,7 +200,19 @@
   }
 
   function applyTo(section, settings) {
-    section.querySelector('#cf-enabled').checked = !!settings.enabled;
+    // Never overwrite a field the user is actively typing into. When the
+    // value comes from `storage.onChanged` (another tab) we'd otherwise
+    // clobber their in-progress keystrokes.
+    const focused = section.contains(document.activeElement) ? document.activeElement : null;
+    const setVal = (sel, value) => {
+      const el = section.querySelector(sel);
+      if (el && el !== focused) el.value = value;
+    };
+    const setChecked = (sel, value) => {
+      const el = section.querySelector(sel);
+      if (el && el !== focused) el.checked = !!value;
+    };
+    setChecked('#cf-enabled', settings.enabled);
     section.querySelectorAll('[data-level]').forEach((btn) => {
       btn.setAttribute('aria-pressed', btn.dataset.level === settings.level ? 'true' : 'false');
     });
@@ -205,10 +220,10 @@
     section.querySelector('#cf-rule-count').textContent = t('cfRuleCounts', ruleCount(settings.level), settings.customRules.length);
     const srcEl = section.querySelector('#cf-rules-source');
     if (srcEl) srcEl.textContent = rulesSourceText();
-    section.querySelector('#cf-whitelistFollowing').checked = settings.whitelistFollowing !== false;
-    section.querySelector('#cf-whitelistHandles').value = settings.whitelistHandles.join(', ');
-    section.querySelector('#cf-blacklistHandles').value = settings.blacklistHandles.join(', ');
-    section.querySelector('#cf-whitelistDomains').value = settings.whitelistDomains.join(', ');
+    setChecked('#cf-whitelistFollowing', settings.whitelistFollowing !== false);
+    setVal('#cf-whitelistHandles', settings.whitelistHandles.join(', '));
+    setVal('#cf-blacklistHandles', settings.blacklistHandles.join(', '));
+    setVal('#cf-whitelistDomains', settings.whitelistDomains.join(', '));
     renderCustomList(section, settings);
     renderAllRules(section, settings);
   }
