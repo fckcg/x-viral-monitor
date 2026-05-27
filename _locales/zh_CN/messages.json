@@ -454,5 +454,6 @@
   "cfRulesRefreshing":    { "message": "拉取中…" },
   "cfRulesRefreshOk":     { "message": "规则已更新。" },
   "cfRulesRefreshErr":    { "message": "拉取失败,请稍后重试。" },
+  "cfAutoSaved":          { "message": "已自动保存" },
   "advAppearanceTitle": { "message": "外观" }
 }

@@ -449,5 +449,6 @@
   "cfRulesRefreshing":    { "message": "取得中…" },
   "cfRulesRefreshOk":     { "message": "ルールを更新しました。" },
   "cfRulesRefreshErr":    { "message": "取得に失敗しました。後ほど再試行してください。" },
+  "cfAutoSaved":          { "message": "自動保存しました" },
   "advAppearanceTitle": { "message": "外観" }
 }

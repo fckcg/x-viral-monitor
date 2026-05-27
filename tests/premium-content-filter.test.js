@@ -460,6 +460,54 @@ describe('#123 XVM content filter v1', () => {
     expect(api._debug.classify(normalShort).hide).toBe(false);
   });
 
+  it('does not false-positive 福利鸭 / 福利姬 self-mockery bios when keyword is not paired with spam carrier', () => {
+    const api = loadDebug();
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
+
+    const ducky = {
+      id: 'fp-ducky',
+      content: '今天好困',
+      urls: [],
+      author: {
+        handle: 'sample_following_a',
+        name: 'Sample',
+        bio: '🤠从不向任何人透露自己真名\n🧱985做题区大学失业率重要贡献者\n🏋️健身教练下海想当福利鸭转型失败\n🤖零基础幻想跨考408的AI新手小白',
+        location: '',
+      },
+    };
+    const realSpam = {
+      id: 'tp-spam',
+      content: '福利资源都在群里',
+      urls: [],
+      author: { handle: 'spam_zhongtui', name: 'spam', bio: '福利姬导航', location: '' },
+    };
+
+    expect(api._debug.classify(ducky).hide).toBe(false);
+    expect(api._debug.classify(realSpam).hide).toBe(true);
+  });
+
+  it('whitelistFollowing short-circuits classification regardless of which rules would match', () => {
+    const api = loadDebug();
+    api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: true });
+
+    const followingButTriggers = {
+      id: 'fp-following',
+      content: '福利资源 telegram 群',
+      urls: ['https://t.me/sample'],
+      author: {
+        handle: 'gyro_ai_clone',
+        name: 'Sample Follow',
+        bio: '福利姬导航 中推电报频道',
+        location: '同城上门',
+        following: true,
+      },
+    };
+    const result = api._debug.classify(followingButTriggers);
+    expect(result.hide).toBe(false);
+    expect(result.reason).toBe('whitelist');
+    expect(result.matches).toHaveLength(0);
+  });
+
   it('catches 曰炮平台 / 真人认证 / 小号已禁言大号 bios even when content slips short-symbol check', () => {
     const api = loadDebug();
     api.updateSettings({ enabled: true, level: 'standard', whitelistFollowing: false });
@@ -506,7 +554,7 @@ describe('#123 XVM content filter v1', () => {
             rest_id: 'u1',
             core: { name: 'Sample', screen_name: 'sample_user' },
             legacy: {
-              description: '家父马斯克，频道见 t.me/sample',
+              description: '家父马斯克，电报频道见 t.me/sample',
               location: '',
               entities: {
                 url: {

@@ -456,5 +456,6 @@
   "cfRulesRefreshing":    { "message": "Fetching…" },
   "cfRulesRefreshOk":     { "message": "Rules updated." },
   "cfRulesRefreshErr":    { "message": "Fetch failed, please retry later." },
+  "cfAutoSaved":          { "message": "Auto-saved" },
   "advAppearanceTitle": { "message": "Appearance" }
 }

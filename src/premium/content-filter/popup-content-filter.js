@@ -158,7 +158,7 @@
       <p class="rf-rule-hint cf-rules-source" id="cf-rules-source"></p>
       <button type="button" id="cf-rules-refresh" class="rf-btn-ghost cf-rules-refresh" data-k="cfRulesRefresh"></button>
 
-      <details class="cf-custom">
+      <details class="cf-custom" id="cf-custom-details">
         <summary data-k="cfCustomTitle"></summary>
         <div class="cf-add-grid">
           <select id="cf-type">${TYPES.map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
@@ -177,14 +177,13 @@
         <label class="rf-row cf-whitelist"><span data-k="cfWhitelistDomains"></span><input type="text" id="cf-whitelistDomains" /></label>
       </details>
 
-      <details class="cf-rules" open>
+      <details class="cf-rules" id="cf-rules-details">
         <summary data-k="cfAllRulesTitle"></summary>
         <div id="cf-all-rules" class="cf-rule-list"></div>
       </details>
 
       <p class="rf-rule-hint" data-k="cfRuleHint"></p>
       <div class="rf-actions">
-        <button type="button" id="cf-save" class="rf-btn" data-k="rfSave"></button>
         <button type="button" id="cf-reset" class="rf-btn-ghost" data-k="rfReset"></button>
       </div>
       <div class="rf-msg" id="cf-msg"></div>
@@ -308,13 +307,40 @@
     let settings = normalize(await storageGet(STORAGE_KEY, DEFAULTS));
     applyTo(section, settings);
 
+    // Debounced auto-save: any input/change/click that mutates `settings`
+    // schedules a write. 300ms is short enough to feel instant and long
+    // enough to coalesce typing into one storage write.
+    let saveTimer = null;
+    let isApplyingExternal = false;
+    function scheduleAutoSave() {
+      if (isApplyingExternal) return;
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(async () => {
+        saveTimer = null;
+        settings = readFrom(section, settings);
+        await storageSet({ [STORAGE_KEY]: settings });
+        flash(section, 'cfAutoSaved');
+      }, 300);
+    }
+    function applyExternal(next) {
+      isApplyingExternal = true;
+      try { applyTo(section, next); } finally { isApplyingExternal = false; }
+    }
+
     section.querySelectorAll('[data-level]').forEach((btn) => {
       btn.addEventListener('click', () => {
         section.dataset.level = btn.dataset.level;
         settings = readFrom(section, settings);
         applyTo(section, settings);
+        scheduleAutoSave();
       });
     });
+    section.querySelector('#cf-enabled').addEventListener('change', scheduleAutoSave);
+    section.querySelector('#cf-whitelistFollowing').addEventListener('change', scheduleAutoSave);
+    ['cf-whitelistHandles', 'cf-blacklistHandles', 'cf-whitelistDomains'].forEach((id) => {
+      section.querySelector(`#${id}`).addEventListener('input', scheduleAutoSave);
+    });
+
     section.querySelector('#cf-add').addEventListener('click', () => {
       const rule = normalizeRule({
         type: section.querySelector('#cf-type').value,
@@ -327,6 +353,7 @@
       settings.customRules.push(rule);
       section.querySelector('#cf-value').value = '';
       applyTo(section, settings);
+      scheduleAutoSave();
     });
     section.querySelector('#cf-custom-list').addEventListener('click', (event) => {
       const idx = event.target?.dataset?.del;
@@ -334,6 +361,7 @@
       settings = readFrom(section, settings);
       settings.customRules.splice(Number(idx), 1);
       applyTo(section, settings);
+      scheduleAutoSave();
     });
     section.querySelector('#cf-all-rules').addEventListener('click', (event) => {
       const idx = event.target?.dataset?.delRule;
@@ -341,16 +369,12 @@
       settings = readFrom(section, settings);
       settings.customRules.splice(Number(idx), 1);
       applyTo(section, settings);
-    });
-    section.querySelector('#cf-save').addEventListener('click', async () => {
-      settings = readFrom(section, settings);
-      await storageSet({ [STORAGE_KEY]: settings });
-      flash(section, 'rfSavedOk');
+      scheduleAutoSave();
     });
     section.querySelector('#cf-reset').addEventListener('click', async () => {
       settings = normalize(DEFAULTS);
       await storageSet({ [STORAGE_KEY]: settings });
-      applyTo(section, settings);
+      applyExternal(settings);
       flash(section, 'rfResetOk');
     });
     section.querySelector('#cf-rules-refresh').addEventListener('click', async (event) => {
@@ -375,15 +399,14 @@
         if (area !== 'local') return;
         if (STORAGE_KEY in changes) {
           settings = normalize(changes[STORAGE_KEY].newValue);
-          applyTo(section, settings);
+          applyExternal(settings);
         }
         if (RULES_KEY in changes) {
           await loadRemoteRulesCache();
-          // Re-render level counts and source text with the new ruleset.
           section.querySelector('[data-level="light"]').textContent = `${t('cfLevelLight')} · ${ruleCount('light')}`;
           section.querySelector('[data-level="standard"]').textContent = `${t('cfLevelStandard')} · ${ruleCount('standard')}`;
           section.querySelector('[data-level="strict"]').textContent = `${t('cfLevelStrict')} · ${ruleCount('strict')}`;
-          applyTo(section, settings);
+          applyExternal(settings);
         }
       });
     } catch (_) {}

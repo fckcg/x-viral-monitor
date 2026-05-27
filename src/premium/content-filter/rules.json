@@ -137,7 +137,7 @@
       "id": "spam-bio-zhongtui-high",
       "type": "regex",
       "field": "bio",
-      "value": "(中推|中文推特|电报|telegram|频道|福利|私信|加群|接推广|福利.{0,4}资源|电报.{0,12}资源|t\\.me.{0,20}资源)",
+      "value": "(中推|中文推特|telegram|加群|接推广|电报.{0,12}(频道|群|资源|福利)|福利(资源|视频|社群|社区|导航|姬|群|频道)|t\\.me.{0,20}资源)",
       "severity": "high"
     },
     {
@@ -151,7 +151,7 @@
       "id": "spam-content-zhongtui-high",
       "type": "regex",
       "field": "content",
-      "value": "(中推|中文推特|电报|telegram|频道|福利|资源|私信|加群|接推广)",
+      "value": "(中推|中文推特|telegram|加群|接推广|电报.{0,12}(频道|群|资源|福利)|福利(资源|视频|社群|社区|导航|姬|群|频道)|t\\.me.{0,20}资源)",
       "severity": "high"
     },
     {

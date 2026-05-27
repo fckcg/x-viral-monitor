@@ -133,7 +133,6 @@
       <p class="rf-rule-hint" data-k="rfRuleHint"></p>
 
       <div class="rf-actions">
-        <button type="button" id="rf-save"  class="rf-btn"       data-k="rfSave"></button>
         <button type="button" id="rf-reset" class="rf-btn-ghost" data-k="rfReset"></button>
       </div>
       <div class="rf-msg" id="rf-msg"></div>
@@ -193,13 +192,23 @@
     const { tier } = await resolveTier();
     setLocked(section, tier === 'free');
 
-    section.querySelector('#rf-save').addEventListener('click', async () => {
-      const payload = readFrom(section);
-      await storageSet({ [STORAGE_KEY]: payload });
-      const msg = section.querySelector('#rf-msg');
-      msg.textContent = t('rfSavedOk');
-      msg.dataset.kind = 'ok';
-      setTimeout(() => { msg.textContent = ''; delete msg.dataset.kind; }, 1500);
+    // Debounced auto-save on any input mutation.
+    let saveTimer = null;
+    function scheduleAutoSave() {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(async () => {
+        saveTimer = null;
+        const payload = readFrom(section);
+        await storageSet({ [STORAGE_KEY]: payload });
+        const msg = section.querySelector('#rf-msg');
+        msg.textContent = t('cfAutoSaved');
+        msg.dataset.kind = 'ok';
+        setTimeout(() => { msg.textContent = ''; delete msg.dataset.kind; }, 1500);
+      }, 300);
+    }
+    section.querySelectorAll('input').forEach((el) => {
+      const ev = el.type === 'checkbox' ? 'change' : 'input';
+      el.addEventListener(ev, scheduleAutoSave);
     });
 
     section.querySelector('#rf-reset').addEventListener('click', async () => {
