@@ -55,6 +55,14 @@
   const DEVICE_ID_KEY  = 'xvm_device_id';
   const RATE_FILTER_KEY = 'xvm_rate_filter_v1';
   const CONTENT_FILTER_KEY = 'xvm_content_filter_v1';
+  const CONTENT_FILTER_RULES_KEY = 'xvm_content_filter_rules_remote_v1';
+
+  // Remote rules: fetched from the repo's canonical rules.json so we can
+  // ship new filter heuristics without rebuilding the extension. Cached in
+  // chrome.storage with a 6h TTL; cold-start falls back to the bundled
+  // rules.js when cache is empty AND fetch fails.
+  const REMOTE_RULES_URL = 'https://raw.githubusercontent.com/Icy-Cat/x-viral-monitor/main/src/premium/content-filter/rules.json';
+  const REMOTE_RULES_TTL_MS = 6 * 60 * 60 * 1000;
 
   const KEY_RE = /^[A-Za-z0-9_\-]{8,128}$/;
 
@@ -326,12 +334,61 @@
     }
   }
 
+  // ─── Remote content-filter rules ────────────────────────────────────
+  // Validate the shape we care about. A broken remote payload should not
+  // wipe out the cached-or-bundled rules.
+  function isValidRulesPayload(p) {
+    return p && typeof p === 'object'
+      && p.levels && typeof p.levels === 'object'
+      && Array.isArray(p.rules);
+  }
+
+  async function pushCachedContentFilterRules() {
+    const cached = await safeStorageGet(CONTENT_FILTER_RULES_KEY, null);
+    if (cached && isValidRulesPayload(cached.payload)) {
+      window.postMessage({
+        type: 'XVM_CONTENT_FILTER_RULES_UPDATE',
+        rules: cached.payload,
+        source: 'remote-cache',
+        fetchedAt: cached.fetchedAt || 0,
+      }, '*');
+      return cached;
+    }
+    return null;
+  }
+
+  async function fetchRemoteContentFilterRules({ force = false } = {}) {
+    const cached = await safeStorageGet(CONTENT_FILTER_RULES_KEY, null);
+    if (!force && cached?.fetchedAt && (Date.now() - cached.fetchedAt) < REMOTE_RULES_TTL_MS) {
+      return;
+    }
+    try {
+      const res = await fetch(REMOTE_RULES_URL, { cache: 'no-cache' });
+      if (!res.ok) return;
+      const payload = await res.json();
+      if (!isValidRulesPayload(payload)) return;
+      const record = { fetchedAt: Date.now(), payload };
+      await safeStorageSet({ [CONTENT_FILTER_RULES_KEY]: record });
+      window.postMessage({
+        type: 'XVM_CONTENT_FILTER_RULES_UPDATE',
+        rules: payload,
+        source: 'remote-fresh',
+        fetchedAt: record.fetchedAt,
+      }, '*');
+    } catch (_) {
+      // Network error: keep whatever cache / bundled rules were already
+      // serving. No user-visible failure mode for a background refresh.
+    }
+  }
+
   // ─── Bootstrap: ensure trial started, push tier so MAIN can render ──
   (async () => {
     await ensureTrialStarted();
     pushTier();
     pushRateSettings();
     pushContentFilterSettings();
+    await pushCachedContentFilterRules();
+    fetchRemoteContentFilterRules().catch(() => {});
   })();
 
   // Re-push on storage change so tier flips immediately if the license
@@ -342,6 +399,7 @@
       if (STORAGE_KEY in changes || TRIAL_KEY in changes) pushTier();
       if (RATE_FILTER_KEY in changes) pushRateSettings();
       if (CONTENT_FILTER_KEY in changes) pushContentFilterSettings();
+      if (CONTENT_FILTER_RULES_KEY in changes) pushCachedContentFilterRules();
     });
   } catch (_) {}
 })();

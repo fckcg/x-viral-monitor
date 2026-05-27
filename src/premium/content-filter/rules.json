@@ -10,20 +10,7 @@
       "adult-nude-leak-high",
       "adult-name-offline-high",
       "adult-location-offline-high",
-      "spam-gambling-high",
-      "spam-phishing-airdrop-high",
-      "spam-name-click-profile-high",
-      "spam-name-funnel-high",
-      "spam-short-symbol-content-high",
-      "spam-bio-zhongtui-high",
-      "spam-content-zhongtui-high"
-    ],
-    "strict": [
-      "hard-telegram-group-funnel",
-      "adult-sex-service-high",
-      "adult-nude-leak-high",
-      "adult-name-offline-high",
-      "adult-location-offline-high",
+      "adult-location-template-high",
       "spam-gambling-high",
       "spam-phishing-airdrop-high",
       "spam-name-click-profile-high",
@@ -31,6 +18,23 @@
       "spam-short-symbol-content-high",
       "spam-bio-zhongtui-high",
       "spam-content-zhongtui-high",
+      "adult-bio-funnel-platform-high"
+    ],
+    "strict": [
+      "hard-telegram-group-funnel",
+      "adult-sex-service-high",
+      "adult-nude-leak-high",
+      "adult-name-offline-high",
+      "adult-location-offline-high",
+      "adult-location-template-high",
+      "spam-gambling-high",
+      "spam-phishing-airdrop-high",
+      "spam-name-click-profile-high",
+      "spam-name-funnel-high",
+      "spam-short-symbol-content-high",
+      "spam-bio-zhongtui-high",
+      "spam-content-zhongtui-high",
+      "adult-bio-funnel-platform-high",
       "adult-bio-medium",
       "spam-telegram-domain-medium",
       "spam-private-chat-medium",
@@ -81,6 +85,13 @@
       "severity": "high"
     },
     {
+      "id": "adult-location-template-high",
+      "type": "regex",
+      "field": "location",
+      "value": "(小号已禁言|来这里找我|可以来.{0,4}找我|加我.{0,4}小号|找我.{0,4}玩|私聊.{0,4}主号)",
+      "severity": "high"
+    },
+    {
       "id": "adult-soft-low",
       "type": "regex",
       "field": "content",
@@ -112,7 +123,7 @@
       "id": "spam-name-funnel-high",
       "type": "regex",
       "field": "name",
-      "value": "(点(我)?(头像|主页)|点击(头像|主页)|看(我)?(头像|主页)|互联网赚|网赚|返佣|费破|免费.{0,4}(破|约)|约见|约P|固炮|同城上门)",
+      "value": "(点(我)?(头像|主页)|点击(头像|主页)|看(我)?(头像|主页)|互联网赚|网赚|返佣|费破|免费.{0,4}(破|约|曰|上门|看|p|P|泡))|免费曰[pP]?|免费上门|免费约[pP]?|约见|约P|固炮|同城上门",
       "severity": "high"
     },
     {
@@ -127,6 +138,13 @@
       "type": "regex",
       "field": "bio",
       "value": "(中推|中文推特|电报|telegram|频道|福利|私信|加群|接推广|福利.{0,4}资源|电报.{0,12}资源|t\\.me.{0,20}资源)",
+      "severity": "high"
+    },
+    {
+      "id": "adult-bio-funnel-platform-high",
+      "type": "regex",
+      "field": "bio",
+      "value": "(曰炮|曰[pP]平台|约炮平台|约[pP]平台|炮友平台|入驻.{0,6}(曰|约)[炮pP]|真人认证.{0,12}(隐私|平台|安全|保护)|小号已禁言.{0,12}大号|附近.{0,4}(可)?加[vV微]|加[vV微].{0,4}(私聊|约|看|附近))",
       "severity": "high"
     },
     {

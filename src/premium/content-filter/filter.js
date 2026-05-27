@@ -44,7 +44,17 @@
   let applyScheduled = false;
   const decisions = new Map();
   const hiddenRecords = new Map();
-  const source = createLocalRuleSource(window.__xvmContentFilterBuiltinRules);
+  let source = createLocalRuleSource(window.__xvmContentFilterBuiltinRules);
+  let rulesSourceLabel = 'bundled';
+
+  function updateRulesFromRemote(payload, label) {
+    if (!payload || typeof payload !== 'object') return;
+    if (!payload.levels || !Array.isArray(payload.rules)) return;
+    source = createLocalRuleSource(payload);
+    rulesSourceLabel = label || 'remote';
+    reclassifyAll();
+    applyHidesNow();
+  }
 
   function gateOpen() {
     return window.__xvmPro?.isFeatureEnabled('content-filter') === true;
@@ -128,6 +138,8 @@
     if (event.source !== window) return;
     if (event.data?.type === 'XVM_CONTENT_FILTER_SETTINGS_UPDATE') {
       updateSettings(event.data.settings);
+    } else if (event.data?.type === 'XVM_CONTENT_FILTER_RULES_UPDATE') {
+      updateRulesFromRemote(event.data.rules, event.data.source);
     }
   });
 
@@ -347,11 +359,16 @@
   }
 
   function isShortSymbolSpam(text) {
-    const s = String(text || '').replace(/\s+/g, '');
-    if (!s || s.length > 30) return false;
+    const stripped = String(text || '').replace(/(?:^|\s)@[A-Za-z0-9_]+/g, ' ');
+    const s = stripped.replace(/\s+/g, '');
+    if (!s) return false;
     if ((s.match(/[\u4e00-\u9fff]/g) || []).length >= 2) return false;
     const alnum = (s.match(/[A-Za-z0-9]/g) || []).length;
     const symbols = (s.match(/[\u0F00-\u0FFF\u2000-\u206F\u2600-\u27BF\uFE00-\uFE0F\u{1F000}-\u{1FAFF}]/gu) || []).length;
+    // Whitespace-heavy emoji-grid spam (e.g. "\uD83D\uDC93w  \n  \uD83C\uDF26  \n  92\uD83E\uDD0E \n  \uD83D\uDE17 \n\uD83D\uDCFFb").
+    // After stripping @mentions: 5+ emoji with at most a few stray letters/digits.
+    if (symbols >= 4 && alnum <= symbols + 2) return true;
+    if (s.length > 30) return false;
     if (symbols >= 3 && symbols >= alnum) return true;
     if (/[A-Za-z]/.test(s) && /\d/.test(s) && symbols >= 1) return true;
     return /^[A-Za-z]{1,2}\d{1,3}[A-Za-z]{1,2}$/u.test(s);
@@ -473,19 +490,29 @@
   function ensureSummaryBar() {
     ensureStyle();
     let bar = document.getElementById('xvm-content-filter-summary');
-    if (bar) return bar;
     const anchor = findReplyAnchor();
-    if (!anchor?.container) return null;
-    bar = document.createElement('div');
-    bar.id = 'xvm-content-filter-summary';
-    bar.className = 'xvm-cf-summary';
-    bar.addEventListener('click', () => {
-      summaryOpen = !summaryOpen;
-      bar.dataset.open = summaryOpen ? '1' : '0';
+    if (!anchor?.host) {
+      if (bar?.parentElement) bar.remove();
+      return null;
+    }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'xvm-content-filter-summary';
+      bar.className = 'xvm-cf-summary';
+      bar.addEventListener('click', () => {
+        summaryOpen = !summaryOpen;
+        bar.dataset.open = summaryOpen ? '1' : '0';
+        summarySignature = '';
+        updateSummary();
+      });
+      // New element has no innerHTML yet — force updateSummary to rebuild it.
       summarySignature = '';
-      updateSummary();
-    });
-    anchor.container.insertBefore(bar, anchor.before || null);
+    }
+    if (bar.parentElement !== anchor.host || bar !== anchor.host.lastElementChild) {
+      anchor.host.appendChild(bar);
+      // Re-parented (e.g., virtualizer re-rendered the host) — rebuild content.
+      summarySignature = '';
+    }
     return bar;
   }
 
@@ -526,12 +553,10 @@
     const mainIdx = mainArticleIndex(items);
     if (mainIdx < 0) return null;
     const mainCell = items[mainIdx].cell;
-    const container = mainCell?.parentElement;
-    if (!container) return null;
-    const siblings = Array.from(container.children || []);
-    const siblingIdx = siblings.indexOf(mainCell);
-    const before = mainCell.nextSibling || (siblingIdx >= 0 ? siblings[siblingIdx + 1] : null) || null;
-    return { container, before };
+    if (!mainCell) return null;
+    // Host inside the main tweet's absolutely-positioned cell so the banner
+    // shares its layout slot and the virtualizer re-measures replies below.
+    return { host: mainCell };
   }
 
   function updateSummary() {
@@ -643,6 +668,8 @@
       isOwnMutation,
       scheduleApply,
       gateOpen,
+      updateRulesFromRemote,
+      rulesSource: () => rulesSourceLabel,
     },
   };
 
