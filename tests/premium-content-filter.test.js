@@ -203,11 +203,16 @@ describe('#123 XVM content filter v1', () => {
     expect(popupFilter).not.toMatch(/cf-locked-hint/);
   });
 
-  it('badge CSS hides empty or incomplete velocity badges', () => {
+  it('badge CSS hides incomplete velocity badges via data-attribute selectors (not :empty)', () => {
     const styles = readFileSync(resolve(repo, 'styles.css'), 'utf8');
-    expect(styles).toMatch(/\.xvm-badge:empty/);
+    // :empty does NOT work for badges — their visible text lives in
+    // ::before/::after pseudo-elements which :empty ignores. Using :empty
+    // would hide every badge in production (regression from earlier fix).
+    expect(styles).not.toMatch(/\.xvm-badge:empty/);
     expect(styles).toMatch(/\.xvm-badge:not\(\[data-prefix\]\)/);
     expect(styles).toMatch(/\.xvm-badge:not\(\[data-velocity\]\)/);
+    expect(styles).toMatch(/\.xvm-badge\[data-prefix=""\]/);
+    expect(styles).toMatch(/\.xvm-badge\[data-velocity=""\]/);
     expect(content).toMatch(/if \(!prefix \|\| !velocityLabel\) continue/);
   });
 
