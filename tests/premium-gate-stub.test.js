@@ -127,16 +127,18 @@ describe('#45 M1 step 1 — premium gate scaffold', () => {
       ).toBe(true);
     });
 
-    it('disabled scope revokes previously hidden tweets without clearing decisions', () => {
+    it('disabled scope revokes previously hidden tweets per-decision without clearing the cache', () => {
       const apply = filter.match(/function\s+applyHidesNow\s*\(\)\s*\{[\s\S]*?\n  \}/);
       expect(apply, 'applyHidesNow() body must be locatable').not.toBeNull();
-      // After the scope-per-page redesign the master enabled toggle is
-      // gone; applyHidesNow now gates on currentPageScopeEnabled().
-      expect(/currentPageScopeEnabled\s*\(\s*\)/.test(apply[0]),
-        'applyHidesNow() must check currentPageScopeEnabled() (no master enabled flag any more)'
+      // Per-decision gating: each cached decision remembers its scope and
+      // is un-hidden in place when that scope flips off. We don't gate on
+      // a global URL-derived scope check any more — that flapped under
+      // interleaved Home/List responses on /home pinned-list tabs.
+      expect(/scopeEnabled\s*\(\s*d\.scope\s*\)/.test(apply[0]),
+        'applyHidesNow() must check scopeEnabled(d.scope) per cached decision'
       ).toBe(true);
       expect(/revoke\s*\(\s*\)\s*;/.test(apply[0]),
-        'applyHidesNow() must revoke hidden cells when the filter is OFF for this scope'
+        'applyHidesNow() must revoke hidden cells when the gate is closed (tier revoke)'
       ).toBe(true);
       expect(/decisions\.clear\s*\(\s*\)/.test(apply[0]),
         'turning OFF must not clear cached decisions; turning ON should be instant'

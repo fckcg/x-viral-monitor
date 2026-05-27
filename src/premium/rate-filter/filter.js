@@ -36,16 +36,20 @@
   //     virality-actually-passing tweets only.
   // popup-rate-filter.js DEFAULTS mirror these values; contract test pins
   // both files identical.
+  // In-memory bootstrap defaults. Scope flags are all-OFF so the gap
+  // between activate() and the first XVM_RATE_SETTINGS_UPDATE arriving
+  // from isolated.js doesn't accidentally filter under all scopes for
+  // any GraphQL response that races our settings sync. Popup DEFAULTS
+  // and these MUST stay in lock-step (covered by a contract test).
   let SETTINGS = {
-    enabled: false,
     shortRateThreshold: 1000,
     shortAbsoluteThreshold: 10000,
     longRateThreshold: 1000,
     longAbsoluteThreshold: 10000,
-    scopeHome: true,
-    scopeList: true,
-    scopeProfile: true,
-    scopeStatus: true,
+    scopeHome: false,
+    scopeList: false,
+    scopeProfile: false,
+    scopeStatus: false,
   };
 
   function updateSettings(patch) {
@@ -117,10 +121,9 @@
   // the responses are ListLatestTweetsTimeline.
   let _lastActiveScope = null;
 
+  // Used only by _debug consumers (bb-browser repro / popup probe). The
+  // hot path is per-decision gating in applyHidesNow.
   function currentPageScopeEnabled() {
-    // Prefer the actual data-source scope when we've seen one; only fall
-    // back to URL inference for a cold-start render before any GraphQL
-    // response has fired.
     const scope = _lastActiveScope || scopeFromPath();
     return !!scope && scopeEnabled(scope);
   }
@@ -169,28 +172,32 @@
           if (source === 'fetch') data = await response.clone().json();
           else data = response.json();
         } catch (_) { return; }
-        scanForTweets(data);
+        scanForTweets(data, scope);
         applyHidesNow();
       });
     }
   }
 
   // === Tweet scanner ===
-  function scanForTweets(obj) {
+  // `scope` flows through so each decision remembers which endpoint
+  // provided its data. applyHidesNow gates per-decision on that scope,
+  // not on whatever `_lastActiveScope` happens to be when it runs —
+  // otherwise interleaved Home/List responses would flap the gate.
+  function scanForTweets(obj, scope) {
     if (!obj || typeof obj !== 'object') return;
     if (obj.tweet_results?.result) {
       const raw = extractRaw(obj.tweet_results.result);
       if (raw && raw.id) {
-        decisions.set(raw.id, { ...classify(raw), raw });
+        decisions.set(raw.id, { ...classify(raw), raw, scope });
       }
     }
     if (Array.isArray(obj)) {
-      for (const item of obj) scanForTweets(item);
+      for (const item of obj) scanForTweets(item, scope);
     } else {
       for (const k of Object.keys(obj)) {
         if (k === 'tweet_results') continue;
         const v = obj[k];
-        if (v && typeof v === 'object') scanForTweets(v);
+        if (v && typeof v === 'object') scanForTweets(v, scope);
       }
     }
   }
@@ -244,10 +251,10 @@
   // article so tracking selectors (e.g. revoke's [data-xvm-rate-hidden])
   // keep working.
   function applyHidesNow() {
-    // Tier revoke or OFF must restore only nodes this module hid. Decisions
-    // stay cached so turning ON again can immediately re-hide already scanned
-    // timeline tweets without waiting for another GraphQL response.
-    if (!gateOpen() || !currentPageScopeEnabled()) {
+    // Tier revoke or no-scope-active must restore only nodes this module
+    // hid. Decisions stay cached so turning ON again can immediately
+    // re-hide already scanned timeline tweets.
+    if (!gateOpen()) {
       revoke();
       return;
     }
@@ -257,6 +264,18 @@
       if (!tid) continue;
       const d = decisions.get(tid);
       if (!d) continue;
+      // Per-decision gating: each tweet remembers which endpoint provided
+      // it, so an interleaved HomeTimeline + ListLatestTweetsTimeline
+      // burst can't flap the gate. The decision's scope is the source of
+      // truth — not the current URL or the last response observed.
+      if (d.scope && !scopeEnabled(d.scope)) {
+        if (art.getAttribute(HIDE_ATTR)) {
+          art.removeAttribute(HIDE_ATTR);
+          const cellRestore = cellForArticle(art);
+          restoreCellIfNoOtherXvmMarker(art, cellRestore);
+        }
+        continue;
+      }
       const cell = cellForArticle(art);
       if (d.hide) {
         if (cell.style.display !== 'none') {

@@ -81,10 +81,13 @@ describe('#45 rate-filter popup settings (dev1 gap fix)', () => {
     expect(/shortAbsoluteThreshold:\s*10000\b/.test(filter)).toBe(true);
     expect(/longRateThreshold:\s*1000\b/.test(filter)).toBe(true);
     expect(/longAbsoluteThreshold:\s*10000\b/.test(filter)).toBe(true);
-    expect(/scopeHome:\s*true\b/.test(filter)).toBe(true);
-    expect(/scopeList:\s*true\b/.test(filter)).toBe(true);
-    expect(/scopeProfile:\s*true\b/.test(filter)).toBe(true);
-    expect(/scopeStatus:\s*true\b/.test(filter)).toBe(true);
+    // filter.js DEFAULTS must mirror popup-rate-filter.js DEFAULTS so the
+    // gap between activate() and the first XVM_RATE_SETTINGS_UPDATE can
+    // never filter under stale all-true defaults.
+    expect(/scopeHome:\s*false\b/.test(filter)).toBe(true);
+    expect(/scopeList:\s*false\b/.test(filter)).toBe(true);
+    expect(/scopeProfile:\s*false\b/.test(filter)).toBe(true);
+    expect(/scopeStatus:\s*false\b/.test(filter)).toBe(true);
   });
 
   it('popup-rate-filter.js is tier-aware (locks form when free)', () => {

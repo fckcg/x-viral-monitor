@@ -1165,18 +1165,26 @@ function installLeaderboardFilterStateSync() {
   const checkPath = () => {
     if (window.location.pathname === lastPath) return;
     lastPath = window.location.pathname;
+    // Drop the previously observed GraphQL scope — until the new page's
+    // first response arrives, fall back to URL-based inference. Otherwise
+    // an in-flight toggle would write to the previous page's scope key.
+    _activeScope = null;
     setLeaderboardHotSwitchState();
   };
   window.addEventListener('popstate', checkPath);
   // Hook pushState/replaceState since SPAs don't emit popstate for them.
+  // Guard against double-wrapping on extension hot-reload (content.js
+  // re-runs in the same tab but history.* is still wrapped from before).
   for (const m of ['pushState', 'replaceState']) {
     const orig = history[m];
-    if (typeof orig !== 'function') continue;
-    history[m] = function () {
+    if (typeof orig !== 'function' || orig.__xvmWrapped) continue;
+    const wrapped = function () {
       const r = orig.apply(this, arguments);
       setTimeout(checkPath, 0);
       return r;
     };
+    wrapped.__xvmWrapped = true;
+    history[m] = wrapped;
   }
   window.postMessage({ type: 'XVM_RATE_FILTER_REQUEST' }, '*');
 }
