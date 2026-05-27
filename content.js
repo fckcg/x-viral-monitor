@@ -1106,8 +1106,16 @@ function scopeFromPath(pathname = window.location.pathname) {
 }
 const SCOPE_KEY_FOR = { home: 'scopeHome', list: 'scopeList', profile: 'scopeProfile', status: 'scopeStatus' };
 let _rateFilterScopes = { scopeHome: false, scopeList: false, scopeProfile: false, scopeStatus: false };
+// rate-filter pushes the scope of the actual GraphQL endpoint producing
+// data, which is authoritative for /home pinned-list tabs (URL says home,
+// data comes from list endpoint). Falls back to URL inference until the
+// first response fires.
+let _activeScope = null;
+function currentLeaderboardScope() {
+  return _activeScope || scopeFromPath();
+}
 function currentScopeEnabled() {
-  const scope = scopeFromPath();
+  const scope = currentLeaderboardScope();
   if (!scope) return false;
   return !!_rateFilterScopes[SCOPE_KEY_FOR[scope]];
 }
@@ -1115,7 +1123,7 @@ function setLeaderboardHotSwitchState() {
   const hot = leaderboardEl?.querySelector('.xvm-lb-hot');
   if (!hot) return;
   const tier = hot.dataset.tier || 'free';
-  const scope = scopeFromPath();
+  const scope = currentLeaderboardScope();
   const supportedHere = !!scope;
   const on = tier !== 'free' && supportedHere && currentScopeEnabled();
   hot.dataset.on = on ? '1' : '0';
@@ -1123,7 +1131,7 @@ function setLeaderboardHotSwitchState() {
   hot.setAttribute('aria-disabled', (tier === 'free' || !supportedHere) ? 'true' : 'false');
   hot.title = tier === 'free'
     ? (i18n('contentLbHotProTitle') || '流速过滤是 Pro 功能')
-    : (supportedHere ? '' : '此页面不支持流速过滤');
+    : (supportedHere ? '' : '此页面暂未识别作用域');
   const cb = hot.querySelector('input[type="checkbox"]');
   if (cb) {
     if (cb.checked !== on) cb.checked = on;
@@ -1136,13 +1144,19 @@ function installLeaderboardFilterStateSync() {
     if (ev.data?.type === 'XVM_RATE_SETTINGS_UPDATE' && ev.data.settings) {
       const s = ev.data.settings;
       _rateFilterScopes = {
-        scopeHome: s.scopeHome !== false && s.scopeHome === true,
-        scopeList: s.scopeList !== false && s.scopeList === true,
-        scopeProfile: s.scopeProfile !== false && s.scopeProfile === true,
-        scopeStatus: s.scopeStatus !== false && s.scopeStatus === true,
+        scopeHome: s.scopeHome === true,
+        scopeList: s.scopeList === true,
+        scopeProfile: s.scopeProfile === true,
+        scopeStatus: s.scopeStatus === true,
       };
       setLeaderboardHotSwitchState();
       if (leaderboardEnabled) setTimeout(renderLeaderboard, 80);
+    }
+    if (ev.data?.type === 'XVM_RATE_FILTER_ACTIVE_SCOPE' && typeof ev.data.scope === 'string') {
+      if (_activeScope !== ev.data.scope) {
+        _activeScope = ev.data.scope;
+        setLeaderboardHotSwitchState();
+      }
     }
   });
   // Track SPA navigation: X uses pushState/popstate. When the path changes
@@ -1182,15 +1196,15 @@ function onHotToggleClick(ev) {
   const hot = leaderboardEl?.querySelector('.xvm-lb-hot');
   if (!hot) return;
   const tier = hot.dataset.tier || 'free';
-  const scope = scopeFromPath();
+  const scope = currentLeaderboardScope();
   if (tier === 'free') {
     ev.preventDefault();
     showLeaderboardUpgradeBubble();
     return;
   }
   if (!scope) {
-    // Page isn't one of home / list / profile / status — toggling here
-    // has nowhere to write to. Keep the checkbox visually unchanged.
+    // No active scope yet (no GraphQL response observed AND URL doesn't
+    // map to any known scope). Toggling has nowhere to write to.
     ev.preventDefault();
     return;
   }

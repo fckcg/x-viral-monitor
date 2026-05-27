@@ -108,12 +108,21 @@
 
   function scopeEnabled(scope) {
     const key = SCOPE_SETTING_KEY[scope];
-    return !key || SETTINGS[key] !== false;
+    return !key || SETTINGS[key] === true;
   }
 
+  // Tracks the scope of the most recent GraphQL response observed on this
+  // page. Authoritative for "what data is currently rendered" — URL path
+  // is unreliable on /home pinned-list tabs where the URL says home but
+  // the responses are ListLatestTweetsTimeline.
+  let _lastActiveScope = null;
+
   function currentPageScopeEnabled() {
-    const scope = scopeFromPath();
-    return !scope || scopeEnabled(scope);
+    // Prefer the actual data-source scope when we've seen one; only fall
+    // back to URL inference for a cold-start render before any GraphQL
+    // response has fired.
+    const scope = _lastActiveScope || scopeFromPath();
+    return !!scope && scopeEnabled(scope);
   }
 
   const ENDPOINT_MATCHERS = [
@@ -148,7 +157,13 @@
     for (const { re, scope } of ENDPOINT_MATCHERS) {
       window.__xvmNet.onResponse(re, async ({ response, source }) => {
         if (!gateOpen()) return;
-        if (!scopeEnabled(scope) || !currentPageScopeEnabled()) return;
+        // Always broadcast the active GraphQL scope so the leaderboard's
+        // hot toggle reflects the actual data source — not the URL path,
+        // which is wrong for pinned-list tabs on /home where the URL is
+        // /home but the data comes from ListLatestTweetsTimeline.
+        _lastActiveScope = scope;
+        window.postMessage({ type: 'XVM_RATE_FILTER_ACTIVE_SCOPE', scope }, '*');
+        if (!scopeEnabled(scope)) return;
         let data;
         try {
           if (source === 'fetch') data = await response.clone().json();
