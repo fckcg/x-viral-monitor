@@ -782,14 +782,36 @@ function computeScore(data) {
 
 // === Tooltip Container (fixed, appended to body) ===
 let tooltipEl = null;
+let tooltipGlobalDismissBound = false;
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.style.display = 'none';
+}
+
+function bindTooltipGlobalDismiss() {
+  if (tooltipGlobalDismissBound) return;
+  tooltipGlobalDismissBound = true;
+
+  window.addEventListener('blur', hideTooltip);
+  window.addEventListener('scroll', hideTooltip, true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hideTooltip();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideTooltip();
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (event.target?.closest?.('.xvm-badge, .xvm-tooltip')) return;
+    hideTooltip();
+  }, true);
+}
+
 function getTooltip() {
   if (!tooltipEl) {
     tooltipEl = document.createElement('div');
     tooltipEl.className = 'xvm-tooltip';
-    tooltipEl.addEventListener('mouseleave', () => {
-      tooltipEl.style.display = 'none';
-    });
+    tooltipEl.addEventListener('mouseleave', hideTooltip);
     document.body.appendChild(tooltipEl);
+    bindTooltipGlobalDismiss();
   }
   return tooltipEl;
 }
@@ -873,7 +895,7 @@ function renderBadges() {
       const tip = getTooltip();
       // Don't hide if mouse is moving into the tooltip itself
       if (tip.contains(e.relatedTarget)) return;
-      tip.style.display = 'none';
+      hideTooltip();
     });
 
     headerRow.insertBefore(badge, headerRow.lastElementChild);
