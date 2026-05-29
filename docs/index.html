@@ -215,11 +215,19 @@
       min-width: 88px;
       padding: 7px 10px;
       border-radius: 999px;
-      text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       font-size: 12px;
       font-weight: 800;
       color: #07100a;
       background: linear-gradient(135deg, var(--green), #b9ff55);
+    }
+
+    .rate-pill .rate-emoji {
+      font-size: 13px;
+      line-height: 1;
     }
 
     .tweet-row:nth-child(2) .rate-pill {
@@ -575,9 +583,9 @@
     <header class="hero">
       <div class="hero-scene" aria-hidden="true">
         <div class="ticker-board">
-          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill">860/h</span></div>
-          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill">4.2k/h</span></div>
-          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill">31k/h</span></div>
+          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill"><span class="rate-emoji">🌱</span>860/h</span></div>
+          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill"><span class="rate-emoji">🚀</span>4.2k/h</span></div>
+          <div class="tweet-row"><span class="avatar"></span><span class="tweet-lines"><span></span><span></span></span><span class="rate-pill"><span class="rate-emoji">🔥</span>31k/h</span></div>
         </div>
       </div>
       <div class="wrap">
